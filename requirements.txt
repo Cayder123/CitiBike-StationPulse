@@ -1,0 +1,18 @@
+# CitiBike-StationPulse Core Dependencies
+# Python >= 3.10, PySpark 3.5.x, Java 17/21 LTS compatible
+
+# Apache Spark runtime for big data processing
+pyspark>=3.5.0,<3.6.0
+
+# HTTP client for robust ingestion downloads
+requests>=2.31.0
+
+# Configuration management
+pyyaml>=6.0.1
+
+# Date and time parsing utilities
+python-dateutil>=2.8.2
+
+# Unit testing and mock validation
+pytest>=7.4.0
+pytest-mock>=3.12.0

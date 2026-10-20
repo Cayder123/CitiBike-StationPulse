@@ -1,0 +1,31 @@
+# CitiBike-StationPulse Project Configuration (Non-sensitive defaults)
+version: "1.0.0"
+
+storage:
+  raw_root: "data/raw"
+  snapshots_root: "data/snapshots"
+  logs_root: "logs"
+
+network:
+  timeout_seconds: 30
+  max_download_mb: 500
+  max_retries: 3
+  retry_backoff_factor: 2.0
+
+data_sources:
+  gbfs:
+    root_url: "https://gbfs.citibikenyc.com/gbfs/gbfs.json"
+    preferred_language: "en"
+    required_feeds:
+      - "station_information"
+      - "station_status"
+  trips:
+    base_url: "https://s3.amazonaws.com/tripdata"
+    default_dataset: "jc"  # Options: 'jc' (Jersey City, ~2MB) or 'nyc' (New York City, ~350MB)
+    default_year: 2024
+    default_month: 1
+
+spark:
+  app_name: "CitiBike-StationPulse"
+  master: "local[*]"
+  driver_memory: "2g"
