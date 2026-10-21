@@ -84,7 +84,7 @@ Stored alongside every raw partition for provenance tracking.
 | `source_url` | String | Exact remote download endpoint |
 | `source_snapshot` | String | Period tag (`2024-01`, `realtime_snapshot`) |
 | `ingested_at_utc` | String | UTC ISO-8601 execution timestamp |
-| `run_id` | String | Execution run identifier (`run_YYYYMMDDTHHMMSSZ`) |
+| `run_id` | String | Execution run identifier (`run_YYYYMMDDTHHMMSS_ffffffZ`; collision suffix may be added) |
 | `filename` | String | Downloaded artifact basename |
 | `bytes` | Integer | Exact byte count on disk |
 | `record_count` | Integer \| null | Verified rows (CSV rows or station count) |

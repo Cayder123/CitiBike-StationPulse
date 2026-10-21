@@ -25,8 +25,8 @@ flowchart TD
     end
 
     subgraph Raw_Storage["3. Immutable Raw Storage"]
-        RawTrips["data/raw/citibike_trips/\ningest_date=YYYY-MM-DD/run_<UTC>/\n- <source_file>.zip\n- manifest.json"]
-        RawGBFS["data/snapshots/gbfs/\ningest_date=YYYY-MM-DD/run_<UTC>/\n- station_information.json\n- station_status.json\n- manifest.json"]
+        RawTrips["data/raw/citibike_trips/\ningest_date=YYYY-MM-DD/run_YYYYMMDDTHHMMSS_ffffffZ[_NN]/\n- <source_file>.zip\n- manifest.json"]
+        RawGBFS["data/snapshots/gbfs/\ningest_date=YYYY-MM-DD/run_YYYYMMDDTHHMMSS_ffffffZ[_NN]/\n- station_information.json\n- station_status.json\n- manifest.json"]
     end
 
     subgraph Verification_Engine["4. Verification & Audit"]
@@ -63,13 +63,13 @@ D:\CitiBike-StationPulse/
 │   ├── raw/
 │   │   └── citibike_trips/
 │   │       └── ingest_date=YYYY-MM-DD/
-│   │           └── run_YYYYMMDDTHHMMSSZ/
+│   │           └── run_YYYYMMDDTHHMMSS_ffffffZ/
 │   │               ├── JC-202401-citibike-tripdata.csv.zip
 │   │               └── manifest.json
 │   ├── snapshots/
 │   │   └── gbfs/
 │   │       └── ingest_date=YYYY-MM-DD/
-│   │           └── run_YYYYMMDDTHHMMSSZ/
+│   │           └── run_YYYYMMDDTHHMMSS_ffffffZ/
 │   │               ├── station_information.json
 │   │               ├── station_status.json
 │   │               └── manifest.json
@@ -91,6 +91,6 @@ D:\CitiBike-StationPulse/
 3. **Cryptographic Lineage (SHA-256)**:
    Every artifact is hashed using streaming SHA-256. The hash is saved alongside metadata in `manifest.json`.
 4. **Isolated Rerun Capability**:
-   Re-running the ingestion script 3 times produces 3 distinct `run_<UTC_TIMESTAMP>` directories, preserving complete historical execution logs.
+    With the default policy, each ingestion run creates a distinct `run_YYYYMMDDTHHMMSS_ffffffZ` directory and preserves its artifact and manifest. The optional `--skip-existing` policy can skip a valid same-day monthly artifact.
 5. **No Secret / Credential Leakage**:
    All loggers pass through a sanitization filter that intercepts auth tokens and sensitive headers. `.gitignore` strictly protects raw datasets and environment files from Git commits.

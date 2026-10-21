@@ -1,229 +1,179 @@
-# StationPulse: Phân tích nhu cầu Citi Bike và mất cân bằng xe tại trạm bằng PySpark
+# Citi Bike StationPulse
 
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![PySpark 3.5](https://img.shields.io/badge/PySpark-3.5.x-orange.svg)](https://spark.apache.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-11%2F11%20Passed-brightgreen.svg)]()
-[![License: Academic](https://img.shields.io/badge/License-Academic%20Use%20Only-lightgrey.svg)]()
+StationPulse là dự án PySpark dùng dữ liệu chuyến đi Citi Bike để xây dựng pipeline nạp dữ liệu và kiểm tra dữ liệu thô. Ở Checkpoint 2, pipeline tải archive tháng từ nguồn chính thức, giữ nguyên file nguồn, lưu manifest truy vết và dùng Spark đọc schema, đếm dòng, xem dữ liệu mẫu. Snapshot đã xác minh đầu tiên là Jersey City, tháng 01/2024.
 
-StationPulse là pipeline kỹ thuật dữ liệu học thuật được xây dựng bằng **PySpark** nhằm phân tích quy luật di chuyển, nhu cầu sử dụng hệ thống xe đạp chia sẻ **Citi Bike** (New York City & New Jersey), đồng thời đánh giá hiện tượng mất cân bằng trạm (thiếu xe / thiếu chỗ trả dock) theo thời gian.
+## Trạng thái Checkpoint 2
 
-Dự án được thiết kế cho nhóm **4 sinh viên** làm việc song song, bám sát yêu cầu đồ án:
-- **Buổi 6 (Hiện tại)**: Thiết lập môi trường chuẩn, Ingestion đáng tin cậy (streaming, backoff, atomic rename, SHA-256), lưu trữ Raw bất biến theo partition, sinh Manifest truy vết nguồn gốc, chạy lại (rerun) an toàn không ghi đè, và xác minh dữ liệu thô bằng PySpark DataFrame.
-- **Buổi 7 (Kế tiếp)**: Chuyển đổi và tổng hợp dữ liệu với Spark DataFrame / Spark SQL, tính toán chỉ số Net-Flow trạm theo giờ và mô hình hóa mất cân bằng trạm.
+Bằng chứng trên máy ngày 21/10/2026:
 
----
+- Môi trường: Python 3.11.9, Java 21.0.8, PySpark 3.5.9, Spark 3.5.9. Smoke test `spark.range(1_000_000).count()` đạt.
+- Ingestion: tải thành công archive Jersey City tháng 01/2024, dung lượng 1.883.296 byte, gồm 50.661 bản ghi CSV.
+- Toàn vẹn dữ liệu: ZIP hợp lệ; SHA-256 là `d59d149f200fb81e204099afb0f76f1b02267bb2d605e92309e6f9974b176e15`.
+- Spark Raw Verify: đọc schema, đếm dòng, hiển thị mẫu; Spark dừng sạch.
+- Kiểm thử tự động: 23/23 bài test đạt trong 10,33 giây.
 
-## 1. Phân chia công việc nhóm 4 người (Four-Person Team Split)
+Phần phân tích bằng Spark cho giai đoạn tiếp theo chưa được triển khai. Các kết quả net-flow theo trạm/giờ hiện là kế hoạch, chưa phải output của repo.
 
-| Thành viên | Vai trò | Trách nhiệm chính | File phụ trách | Nhánh đề xuất |
-| :--- | :--- | :--- | :--- | :--- |
-| **Người 1** | **Điều phối & tích hợp** | Hợp đồng chung, config, manifest, README, PR review, end-to-end và tag checkpoint | `README.md`, `CONTRIBUTING.md`, `config/`, `src/common/`, tích hợp | `feat/coordinator-integration` |
-| **Người 2** | **Môi trường Spark & QA** | Python/Java/PySpark, smoke test 1M, dependency, tests và evidence môi trường | `src/env_check.py`, `requirements.txt`, `pyproject.toml`, `tests/` | `feat/spark-qa` |
-| **Người 3** | **Ingestion chuyến đi lịch sử** | Tải theo tháng, retry, atomic write, SHA-256, manifest, ZIP nhiều CSV và rerun an toàn | `src/ingest_trips.py`, tests ingestion/rerun | `feat/trips-ingestion` |
-| **Người 4** | **GBFS, Raw Verify & trình bày** | Discovery GBFS, snapshot, Spark raw verify, sơ đồ, evidence checklist, 6 slide và pitch ≤4 phút | `src/ingest_gbfs.py`, `src/raw_verify.py`, `docs/` | `feat/gbfs-raw-verify-docs` |
+## Dữ liệu và phạm vi phân tích
 
-Chi tiết quy trình làm việc và tiêu chí nghiệm thu được lưu tại [`docs/team_work_split.md`](docs/team_work_split.md).
+Dự án dùng các file lịch sử chuyến đi Citi Bike công khai. Snapshot đã xác minh là `JC-202401-citibike-tripdata.csv.zip`, tương ứng Jersey City tháng 01/2024. Giai đoạn phân tích tiếp theo có thể tổng hợp lượt xuất phát và kết thúc chuyến đi theo trạm, theo giờ.
 
----
+Chỉ số dự kiến:
 
-## 2. Cấu trúc thư mục (Repository Layout)
-
+```text
+net_flow = lượt đến - lượt đi
 ```
-CitiBike-StationPulse/
-├── README.md
-├── CONTRIBUTING.md
-├── requirements.txt
-├── .env.example
-├── .gitignore
-├── pyproject.toml
-├── src/
-│   ├── __init__.py
-│   ├── env_check.py          # Script kiểm tra Python, Java, PySpark smoke test
-│   ├── ingest_trips.py       # CLI tải lịch sử chuyến đi hàng tháng
-│   ├── ingest_gbfs.py        # CLI phát hiện và chụp snapshot GBFS realtime
-│   ├── raw_verify.py         # CLI xác thực tệp thô bằng Apache Spark
-│   └── common/
-│       ├── __init__.py
-│       ├── config.py         # Quản lý cấu hình tập trung
-│       ├── hashing.py        # Tính toán SHA-256 streaming
-│       ├── logging_utils.py  # Structured UTC logging & khử nhạy cảm token
-│       └── manifest.py       # Định nghĩa, kiểm tra và ghi manifest.json atomic
-├── config/
-│   └── project.example.yaml  # File cấu hình mẫu (không chứa bí mật)
-├── docs/
-│   ├── architecture.md       # Sơ đồ kiến trúc Mermaid & luồng dữ liệu
-│   ├── data_dictionary.md    # Từ điển dữ liệu Trip CSV & GBFS JSON
-│   ├── team_work_split.md    # Phân công chi tiết và quy trình PR cho 4 người
-│   ├── evidence_checklist.md # Checklist bằng chứng nghiệm thu Buổi 6 & dàn ý slide
-│   └── analysis_questions.md # Định hướng phân tích và công thức Net-Flow Buổi 7
+
+Đây là chỉ số đại diện từ luồng chuyến đi, không phải số xe thực tế tại trạm. Dữ liệu lịch sử không ghi hoạt động điều chuyển xe, sức chứa dock, xe ngừng hoạt động hay mọi trường hợp trả xe đạp điện ngoài trạm. Một số chuyến cũng có thể thiếu mã trạm.
+
+## Kiến trúc
+
+```mermaid
+flowchart LR
+    A[Archive chuyến đi Citi Bike] --> B[Streaming ingestion]
+    B --> C[Raw partition theo ngày và run]
+    B --> D[Manifest: nguồn, dung lượng, số dòng, SHA-256]
+    C --> E[Kiểm tra ZIP]
+    E --> F[PySpark: schema, count, sample]
+    F -. Giai đoạn sau .-> G[Phân tích luồng chuyến đi theo giờ]
+```
+
+## Cấu trúc repo
+
+```text
+.
+├── config/project.example.yaml  # Cấu hình mẫu, không chứa secret
 ├── data/
-│   ├── raw/                  # Lưu trữ Trip data bất biến (được gitignore)
-│   ├── snapshots/            # Lưu trữ GBFS JSON snapshots (được gitignore)
-│   └── sample/               # Ghi chú dữ liệu mẫu nhỏ
-├── logs/                     # File nhật ký thực thi (được gitignore)
-├── metadata/                 # Ghi chú manifest & truy vết kiểm toán
-└── tests/
-    ├── test_hashing.py       # Unit test mã băm SHA-256
-    ├── test_manifest.py      # Unit test cấu trúc manifest
-    └── test_rerun_policy.py  # Unit test cách ly rerun & không ghi đè
+│   ├── raw/                     # Archive chuyến đi tại máy, bị gitignore
+│   ├── sample/                  # Hướng dẫn dữ liệu mẫu nhỏ
+│   └── snapshots/               # GBFS snapshots tại máy, bị gitignore
+├── docs/                        # Kiến trúc, schema, evidence, câu hỏi phân tích
+├── logs/                        # Log thực thi tại máy, bị gitignore
+├── metadata/                    # Hướng dẫn metadata dùng chung
+├── src/
+│   ├── common/                  # Config, hashing, logging và manifest
+│   ├── env_check.py             # Kiểm tra Python/Java/PySpark
+│   ├── ingest_gbfs.py           # Ingestion snapshot GBFS tùy chọn
+│   ├── ingest_trips.py          # Ingestion archive chuyến đi theo tháng
+│   └── raw_verify.py            # Kiểm tra ZIP/CSV/JSON bằng Spark
+└── tests/                       # Unit test và Spark integration test
 ```
 
----
+## Yêu cầu
 
-## 3. Yêu cầu hệ thống & Hướng dẫn cài đặt (Windows PowerShell)
+- Python 3.10 trở lên; phiên bản đã xác minh là Python 3.11.9.
+- Java 17 hoặc 21; lần chạy evidence dùng Java 21.0.8.
+- PySpark 3.5.x; lần chạy evidence dùng PySpark/Spark 3.5.9.
+- Các lệnh bên dưới dùng Windows PowerShell và giả định repo ở `D:\CitiBike-StationPulse`.
 
-### 3.1 Điều kiện tiên quyết (Prerequisites)
-1. **Python**: Bản 3.10 hoặc 3.11 64-bit (Đã kiểm tra tương thích trên Python 3.11.9).
-2. **Java Runtime (JDK)**: Java 17 hoặc Java 21 LTS (Đã cài đặt sẵn trên máy: `Java 21.0.8 LTS`). Hãy đảm bảo biến môi trường `JAVA_HOME` đã trỏ đúng tới thư mục cài đặt Java.
-3. **Apache Spark / PySpark**: Bản 3.5.x.
+## Cài đặt
 
-### 3.2 Khởi tạo môi trường ảo & cài đặt thư viện
-Mở **Windows PowerShell** và thực hiện:
+Trên máy mới, clone repo:
 
 ```powershell
-# Chuyển vào thư mục dự án
-Set-Location D:\CitiBike-StationPulse
-
-# Tạo môi trường ảo Python
-python -m venv .venv
-
-# Kích hoạt virtual environment
-.\.venv\Scripts\Activate.ps1
-
-# Nâng cấp pip và cài đặt thư viện
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+git clone https://github.com/Cayder123/CitiBike-StationPulse.git
+Set-Location .\CitiBike-StationPulse
 ```
 
----
+Tạo môi trường và cài thư viện:
 
-## 4. Hướng dẫn thực thi & Bằng chứng nghiệm thu (Buổi 6)
+```powershell
+python -m venv .venv
+\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
 
-### Bước 1: Kiểm tra môi trường (Environment Check)
-Chạy script kiểm tra để xác nhận Python, Java, PySpark và thực thi smoke test Spark sinh và đếm 1,000,000 bản ghi trong bộ nhớ:
+Đảm bảo `java -version` chạy được trong cùng terminal và `JAVA_HOME` trỏ đến JDK. Dự án chạy Spark ở chế độ local (`local[*]`), không yêu cầu dựng Spark cluster riêng.
+
+## Chạy pipeline
+
+### 1. Kiểm tra môi trường
 
 ```powershell
 python src/env_check.py --log-file logs/env_check.txt
 ```
 
-*Lưu ý: Kết quả thực thi sẽ được xuất ra console và lưu lại tại `logs/env_check.txt`.*
+Lệnh ghi các phiên bản Python, Java, PySpark và Spark; chạy `spark.range(1_000_000).count()`; trả exit code 0 nếu thành công.
 
-### Bước 2: Chạy kiểm thử tự động (Unit Tests)
-Hệ thống đi kèm bộ kiểm thử không phụ thuộc mạng (100% mocked):
+### 2. Chạy kiểm thử
 
 ```powershell
 python -m pytest tests -v
 ```
-*(Kết quả: 23/23 bài test đã vượt qua thành công bao gồm hashing, manifest schema, atomic write, zip line count, rerun isolation, zip slip prevention, URL/log sanitization, và spark raw verify).*
 
-### Bước 3: Ingestion dữ liệu lịch sử chuyến đi (Historical Trips)
-CLI hỗ trợ tham số `--dry-run` để kiểm tra kết nối và kích thước file trước khi tải thực tế:
+Lần chạy gần nhất đạt 23/23 bài test, trong đó có Spark verify cho ZIP chứa CSV và fixture JSON GBFS.
+
+### 3. Kiểm tra nguồn rồi tải archive tháng
 
 ```powershell
-# Kiểm tra thử (Dry-run) tháng 01/2024 bộ dữ liệu Jersey City (nhẹ ~1.8 MB)
+# Kiểm tra URL, không tải file
 python src/ingest_trips.py --dataset jc --year 2024 --month 1 --dry-run
 
-# Tải thực tế và ghi vào Raw Storage kèm Manifest
+# Tải archive và tạo manifest
 python src/ingest_trips.py --dataset jc --year 2024 --month 1
 ```
 
-Dữ liệu được lưu trữ bất biến tại:
-`data/raw/citibike_trips/ingest_date=YYYY-MM-DD/run_<UTC_TIMESTAMP>/JC-202401-citibike-tripdata.csv.zip`
+Mỗi lần chạy thành công lưu vào partition mới:
 
-### Bước 4: Ingestion dữ liệu GBFS Real-time (Optional Extension)
-CLI tự động tìm kiếm endpoint từ `gbfs.json` và chụp snapshot 2 feed `station_information` và `station_status`:
+```text
+data/raw/citibike_trips/ingest_date=YYYY-MM-DD/run_YYYYMMDDTHHMMSS_ffffffZ[_NN]/
+├── JC-YYYYMM-citibike-tripdata.csv.zip
+└── manifest.json
+```
+
+Theo mặc định, mỗi lần chạy tạo một run riêng và không ghi đè run trước. Tùy chọn `--skip-existing` chỉ bỏ qua archive cùng ngày khi manifest báo thành công và tên file, snapshot, dung lượng cùng SHA-256 khớp với file đang lưu.
+
+### 4. Dùng Spark xác minh archive thô
 
 ```powershell
-# Kiểm tra phát hiện feed tự động (Dry-run)
+python src/raw_verify.py `
+  --path "data/raw/citibike_trips/ingest_date=*/run_*/JC-202401-citibike-tripdata.csv.zip" `
+  --log-file logs/raw_verify.txt
+```
+
+Verifier chọn partition khớp mới nhất, kiểm tra tính toàn vẹn ZIP, đọc tất cả CSV bên trong bằng Spark, in schema, đếm dòng và hiển thị 5 dòng mẫu. Có thể truyền đường dẫn ZIP cụ thể thay cho wildcard.
+
+### 5. GBFS tùy chọn
+
+```powershell
+# Tìm feed đã cấu hình, không lưu snapshot
 python src/ingest_gbfs.py --dry-run
 
-# Chụp snapshot trực tiếp
+# Tải snapshot station_information và station_status
 python src/ingest_gbfs.py
 ```
 
-Dữ liệu được lưu tại:
-`data/snapshots/gbfs/ingest_date=YYYY-MM-DD/run_<UTC_TIMESTAMP>/`
+GBFS là phần mở rộng snapshot hiện thời. Một snapshot không thể đại diện lịch sử số xe tại trạm và không cần thiết để tái tạo lần ingest chuyến đi đã xác minh.
 
-### Bước 5: Xác minh dữ liệu thô bằng PySpark (Raw Verification)
-Chạy script xác minh để Spark đọc tệp thô, in schema, đếm số dòng và hiển thị 5 dòng đầu:
+## Bằng chứng dữ liệu đã ghi nhận
 
-```powershell
-# Xác thực file ZIP vừa tải (chỉ định đường dẫn cụ thể từ output ingestion, hoặc dùng wildcard trong dấu ngoặc kép)
-python src/raw_verify.py --path "data/raw/citibike_trips/ingest_date=*/run_*/JC-202401-citibike-tripdata.csv.zip" --log-file logs/raw_verify.txt
-# (Lưu ý: CLI hỗ trợ tự động tìm partition mới nhất nếu truyền pattern chứa wildcard)
-```
+| Trường | Giá trị đã xác minh |
+|---|---|
+| Nguồn | [Citi Bike System Data](https://citibikenyc.com/system-data) — `https://s3.amazonaws.com/tripdata/JC-202401-citibike-tripdata.csv.zip` |
+| Snapshot | Jersey City, tháng 01/2024 (`2024-01`) |
+| Run ID | `run_20261021T014618_890189Z` |
+| Raw archive | `data/raw/citibike_trips/ingest_date=2026-10-21/run_20261021T014618_890189Z/JC-202401-citibike-tripdata.csv.zip` |
+| Dung lượng / số dòng | 1.883.296 byte / 50.661 dòng |
+| SHA-256 | `d59d149f200fb81e204099afb0f76f1b02267bb2d605e92309e6f9974b176e15` |
+| Manifest | `data/raw/citibike_trips/ingest_date=2026-10-21/run_20261021T014618_890189Z/manifest.json` |
+| Spark log | `logs/raw_verify.txt` (lưu cục bộ, bị gitignore) |
+| Commit Checkpoint 2 | `505f934d5773590f8fdc4bf57af4c78c9b15074a` |
 
-### Bằng chứng chạy thực tế — JC 2024-01 (2026-10-21)
+Manifest của lần ingest trên ghi `git_commit` là `b062edc00aedacc48ed6e69d1c6a6fc85887a711`, tức HEAD tồn tại khi pipeline chạy. Commit hiện tại là `505f934d5773590f8fdc4bf57af4c78c9b15074a`; mình không sửa manifest cũ để thay đổi lịch sử. Nếu yêu cầu lineage phải trỏ đúng commit đã nộp, hãy chạy ingestion mới từ checkout đã commit và giữ manifest mới.
 
-Nhóm đã tải và xác minh thành công một archive Jersey City tháng 01/2024. Manifest ghi `status: success`, `record_count: 50661`; Spark đọc schema, hiển thị 5 dòng mẫu, đếm **50.661 dòng** và dừng sạch. ZIP hợp lệ, chứa một CSV dữ liệu cùng một file metadata `__MACOSX`.
+Raw data và log bị `.gitignore` loại khỏi Git. Giữ chúng trên máy dùng để nghiệm thu và mở đúng đường dẫn hoặc terminal output khi trình bày. Không dùng `git add -f` để thêm archive hoặc log runtime.
 
-- Run ID: `run_20261021T014618_890189Z`
-- Kích thước: `1,883,296` bytes
-- SHA-256: `d59d149f200fb81e204099afb0f76f1b02267bb2d605e92309e6f9974b176e15`
-- Manifest: `data/raw/citibike_trips/ingest_date=2026-10-21/run_20261021T014618_890189Z/manifest.json`
-- Kết quả verifier: `Raw ZIP and All Internal CSVs Spark Verified [OK]`
+## Điều khoản sử dụng dữ liệu
 
-Đây là bằng chứng cho **một lần ingest và Spark verify**; chưa đại diện cho kiểm tra rerun ba lần hoặc GBFS. Sau lần chạy ban đầu, verifier đã được chạy lại trên cùng archive với `--log-file logs/raw_verify.txt`; lần xác minh này cũng đếm được 50.661 dòng và kết thúc `[OK]`. Dữ liệu Raw và logs được `.gitignore` loại khỏi Git, không commit các file đó.
+Citi Bike công bố lịch sử chuyến đi cho mục đích phân tích. Hãy dùng [trang System Data](https://citibikenyc.com/system-data) và tuân thủ [Data Sharing Policy](https://citibikenyc.com/data-sharing-policy) hiện hành. Chính sách không cho phép phân phối hoặc bán dữ liệu như một bộ dữ liệu độc lập, truy cập ngoài giao diện được cấp phép, tìm cách nhận diện người dùng hoặc ngụ ý Citi Bike bảo trợ dự án. Khi trình bày, ghi Citi Bike là nguồn dữ liệu.
 
----
+## Trạng thái và phần tiếp theo
 
-## 5. Cấu trúc Manifest mẫu (`manifest.json`)
+- Checkpoint 2 có một lần ingest live và unit test xác nhận chính sách chạy lại. Khi báo cáo, giải thích rằng ba lần chạy mặc định tạo ba partition riêng; không cần tải cùng archive ba lần chỉ để chứng minh.
+- Manifest hiện tại có đủ các trường nguồn, thời gian, bytes, record count, SHA-256, run ID, đích lưu và status. `git_commit` ghi HEAD tại thời điểm ingest; tạo một run mới từ commit hiện tại chỉ cần thiết nếu nhóm muốn lineage trỏ chính xác tới commit nộp.
+- GBFS snapshot live là phần mở rộng, không thuộc 5 artifact cốt lõi của Checkpoint 2.
+- Spark transformation và kết quả phân tích thuộc giai đoạn tiếp theo. Trước khi làm, nhóm cần chốt snapshot tháng 01/2024 chỉ là minh chứng hay là toàn bộ phạm vi phân tích; nếu muốn phân tích xu hướng rộng hơn, chọn thêm khoảng thời gian/khu vực.
+- Commit `505f934d5773590f8fdc4bf57af4c78c9b15074a` hiện có ở local `main`, chưa được push; README và một số tài liệu đang có chỉnh sửa rà soát chưa commit.
 
-> [!NOTE]
-> Đoạn JSON dưới đây là **ví dụ minh họa về cấu trúc lược đồ (schema structure example)**, không phải bằng chứng chạy thực tế. Khi chạy thực tế, manifest sẽ chứa mã băm SHA-256 thật, dung lượng byte và commit hash thực tế tương ứng với file artifact trên máy.
-
-Mỗi phân vùng dữ liệu thô luôn đi kèm một file `manifest.json` nguyên tử:
-
-```json
-{
-  "schema_version": "1.0.0",
-  "dataset": "citibike_trips",
-  "source_url": "https://s3.amazonaws.com/tripdata/JC-202401-citibike-tripdata.csv.zip",
-  "source_snapshot": "2024-01",
-  "ingested_at_utc": "2026-10-20T10:35:00Z",
-  "run_id": "run_20261020T103500Z",
-  "filename": "JC-202401-citibike-tripdata.csv.zip",
-  "bytes": 1883296,
-  "record_count": 50601,
-  "sha256": "3a886df43c499c8f0cf4e97a3cf5f8e5f8f81234567890abcdef1234567890ab",
-  "destination": "data/raw/citibike_trips/ingest_date=2026-10-20/run_20261020T103500Z/JC-202401-citibike-tripdata.csv.zip",
-  "status": "success",
-  "pipeline_version": "0.1.0",
-  "git_commit": "e4a2c91",
-  "notes": "Internal CSV files: 1 files (JC-202401-citibike-tripdata.csv)"
-}
-```
-
----
-
-## 6. Chính sách an toàn Rerun & Bất biến (Rerun Policy)
-
-- **Không ghi đè (No Overwrite)**: Mỗi lần chạy script ingestion sẽ tạo một thư mục định danh thời gian duy nhất `run_<UTC_TIMESTAMP>`.
-- **Bảo toàn lịch sử**: Khi chạy lại script 3 lần liên tiếp, hệ thống sẽ bảo toàn 3 thư mục độc lập với đầy đủ file artifact và file manifest riêng biệt.
-- **Atomic Rename**: Tệp tải về được ghi tạm vào đuôi `.tmp` và chỉ được đổi tên chính thức khi toàn bộ dữ liệu đã được ghi và khớp kích thước. Trường hợp mất mạng hoặc lỗi giữa chừng, tệp `.tmp` sẽ được dọn dẹp sạch sẽ, không để lại file rác hay file hỏng trong thư mục Raw.
-
----
-
-## 7. Giới hạn & Bản chất của GBFS Realtime (Limitations)
-
-> [!WARNING]
-> **Điểm mấu chốt về GBFS**:
-> GBFS là giao diện cung cấp trạng thái **thời gian thực tức thời** (point-in-time snapshot) của hệ thống trạm, **KHÔNG PHẢI** là dữ liệu lịch sử. Việc tải một snapshot đơn lẻ không thể dùng để kết luận về tình trạng thiếu xe hay thừa xe trong quá khứ.
->
-> Trong đồ án này:
-> 1. Dữ liệu GBFS phục vụ mục đích mở rộng: quan sát trạng thái dock hiện tại và thông tin vị trí trạm.
-> 2. Việc phân tích mất cân bằng trạm trong lịch sử sẽ được ước lượng thông qua **chỉ số Net-Flow đại diện (Proxy Imbalance Metric)** tính toán từ lịch sử các chuyến đi đón/trả tại trạm theo khung giờ (thực hiện ở Buổi 7).
-
----
-
-## 8. Quyền sở hữu dữ liệu & Tuyên bố miễn trừ (Attribution & Policy)
-
-Dự án này sử dụng dữ liệu mở công khai được cung cấp bởi hệ thống xe đạp công cộng Citi Bike (thành phố New York và New Jersey).
-- **Nguồn dữ liệu chính thức**: [Citi Bike System Data](https://citibikenyc.com/system-data)
-- **Chính sách chia sẻ dữ liệu**: [Citi Bike Data Sharing Policy](https://citibikenyc.com/data-sharing-policy)
-
-**Cam kết tuân thủ chính sách**:
-1. Dữ liệu chỉ được truy xuất qua các giao diện và endpoint chính thức được công bố; không thu thập trái phép (scraping).
-2. Dữ liệu không được bán lại, thương mại hóa, hoặc tái phân phối như một bộ dataset độc lập.
-3. Không thực hiện các thuật toán nhằm suy đoán, tái định danh hoặc can thiệp vào danh tính cá nhân của người sử dụng.
-4. Dự án này phục vụ mục đích học thuật và nghiên cứu nội bộ, **không** được tài trợ, bảo trợ hay liên kết chính thức với Citi Bike, NYC Bikeshare, LLC hoặc Lyft.
+Checklist evidence và các thông tin nhóm cần chốt trước khi nộp nằm trong [`docs/evidence_checklist.md`](docs/evidence_checklist.md).
