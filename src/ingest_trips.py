@@ -7,7 +7,9 @@ ensuring immutable storage, atomic writes, SHA-256 verification, and run-isolate
 from __future__ import annotations
 
 import argparse
+import csv
 import io
+import json
 import os
 import sys
 import time
@@ -26,7 +28,7 @@ if str(project_root) not in sys.path:
 
 from src.common.config import PipelineConfig
 from src.common.hashing import calculate_sha256_file
-from src.common.logging_utils import setup_logger
+from src.common.logging_utils import setup_logger, sanitize_url
 from src.common.manifest import create_manifest, write_manifest_atomic
 
 PIPELINE_VERSION = "0.1.0"
@@ -58,6 +60,8 @@ def build_tripdata_url(base_url: str, dataset: str, year: int, month: int) -> Tu
 def count_records_in_zip(zip_path: Path) -> Tuple[Optional[int], List[str]]:
     """Safely count data records across all CSV files in a ZIP archive without full disk extraction.
 
+    Uses csv.reader to correctly handle multiline quoted fields and skip header rows for each member.
+
     Args:
         zip_path: Path to the downloaded .zip file.
 
@@ -68,17 +72,23 @@ def count_records_in_zip(zip_path: Path) -> Tuple[Optional[int], List[str]]:
     csv_names = []
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
+            # Check archive integrity first
+            bad_crc = zf.testzip()
+            if bad_crc:
+                raise ValueError(f"Corrupt ZIP archive member: {bad_crc}")
+
             for item in zf.infolist():
-                if item.filename.lower().endswith(".csv") and not item.filename.startswith("__MACOSX"):
-                    csv_names.append(item.filename)
+                norm_name = item.filename.replace("\\", "/")
+                if norm_name.lower().endswith(".csv") and not norm_name.startswith("__MACOSX"):
+                    csv_names.append(norm_name)
                     with zf.open(item, "r") as f:
-                        # Stream lines in text mode (UTF-8 with error replace)
-                        text_reader = io.TextIOWrapper(f, encoding="utf-8", errors="replace")
-                        header = text_reader.readline()
-                        if not header:
+                        text_reader = io.TextIOWrapper(f, encoding="utf-8", errors="replace", newline="")
+                        reader = csv.reader(text_reader)
+                        header = next(reader, None)
+                        if header is None:
                             continue  # Empty CSV
-                        rows = sum(1 for line in text_reader if line.strip())
-                        total_records += rows
+                        file_rows = sum(1 for row in reader if row)
+                        total_records += file_rows
         return total_records, csv_names
     except Exception:
         return None, csv_names
@@ -101,7 +111,7 @@ def download_stream(
         Total bytes written.
 
     Raises:
-        ValueError: If payload is empty or exceeds max_download_mb.
+        ValueError: If payload is empty, exceeds max_download_mb, or fails length checks.
         HTTPError: If HTTP status is not 200.
     """
     if logger is None:
@@ -122,20 +132,24 @@ def download_stream(
     session.mount("https://", adapter)
     session.mount("http://", adapter)
 
-    logger.info(f"Initiating streaming download from: {url}")
+    sanitized_url = sanitize_url(url)
+    logger.info(f"Initiating streaming download from: {sanitized_url}")
     try:
         with session.get(url, stream=True, timeout=timeout) as response:
             if response.status_code != 200:
                 raise requests.HTTPError(
-                    f"HTTP GET returned status code {response.status_code} for URL: {url}"
+                    f"HTTP GET returned status code {response.status_code} for URL: {sanitized_url}"
                 )
 
             content_length = response.headers.get("Content-Length")
+            content_len_int = None
             if content_length:
                 content_len_int = int(content_length)
-                logger.info(f"Remote Content-Length: {content_len_int:,} bytes ({content_len_int / (1024 * 1024):.2f} MB)")
+                logger.info(
+                    f"Remote Content-Length: {content_len_int:,} bytes ({content_len_int / (1024 * 1024):.2f} MB)"
+                )
                 if content_len_int == 0:
-                    raise ValueError(f"Remote file at {url} has Content-Length 0 (Empty payload).")
+                    raise ValueError(f"Remote file at {sanitized_url} has Content-Length 0 (Empty payload).")
                 if content_len_int > max_bytes:
                     raise ValueError(
                         f"Remote file ({content_len_int / (1024 * 1024):.2f} MB) exceeds maximum allowed limit of {max_download_mb} MB. "
@@ -154,7 +168,12 @@ def download_stream(
                             )
 
             if bytes_written == 0:
-                raise ValueError(f"Downloaded payload was empty (0 bytes) from {url}.")
+                raise ValueError(f"Downloaded payload was empty (0 bytes) from {sanitized_url}.")
+
+            if content_len_int is not None and bytes_written != content_len_int:
+                raise ValueError(
+                    f"Downloaded bytes ({bytes_written:,}) did not match remote Content-Length ({content_len_int:,})."
+                )
 
             # Atomic rename
             temp_path.replace(target_path)
@@ -169,6 +188,28 @@ def download_stream(
             except Exception:
                 pass
         raise
+
+
+def create_unique_run_dir(base_dir: Path, utc_now: datetime) -> Tuple[str, Path]:
+    """Generate collision-free run ID and create exclusive partition directory."""
+    date_partition = utc_now.strftime("%Y-%m-%d")
+    base_timestamp = utc_now.strftime("%Y%m%dT%H%M%S")
+    microsec = utc_now.microsecond
+
+    parent_partition = base_dir / "citibike_trips" / f"ingest_date={date_partition}"
+    parent_partition.mkdir(parents=True, exist_ok=True)
+
+    # Attempt microsecond timestamp first
+    counter = 0
+    while True:
+        suffix = f"_{counter:02d}" if counter > 0 else ""
+        run_id = f"run_{base_timestamp}_{microsec:06d}Z{suffix}"
+        target_dir = parent_partition / run_id
+        try:
+            target_dir.mkdir(parents=True, exist_ok=False)
+            return run_id, target_dir
+        except FileExistsError:
+            counter += 1
 
 
 def run_ingestion(
@@ -204,7 +245,7 @@ def run_ingestion(
     logger.info("==================================================")
     logger.info("       CitiBike Trip Data Ingestion Pipeline      ")
     logger.info("==================================================")
-    logger.info(f"Source URL       : {target_url}")
+    logger.info(f"Source URL       : {sanitize_url(target_url)}")
     logger.info(f"Snapshot Period  : {snapshot_label}")
     logger.info(f"Dataset Variant  : {dataset}")
     logger.info(f"Max Download MB  : {max_download_mb} MB")
@@ -230,12 +271,38 @@ def run_ingestion(
             logger.error(f"[DRY RUN] Connection error during URL check: {e}")
             return 1
 
-    # Prepare immutable partition path:
-    # data/raw/citibike_trips/ingest_date=YYYY-MM-DD/run_<UTC_TIMESTAMP>/
+    # Skip only a previously successful artifact whose bytes still match its manifest.
+    if skip_existing:
+        date_partition = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        search_dir = raw_base / "citibike_trips" / f"ingest_date={date_partition}"
+        if search_dir.is_dir():
+            for existing_run in search_dir.glob("run_*/"):
+                existing_file = existing_run / filename
+                existing_manifest = existing_run / "manifest.json"
+                if existing_file.is_file() and existing_manifest.is_file():
+                    try:
+                        manifest_data = json.loads(existing_manifest.read_text(encoding="utf-8"))
+                        stored_hash = manifest_data.get("sha256")
+                        if (
+                            manifest_data.get("status") == "success"
+                            and manifest_data.get("dataset") == "citibike_trips"
+                            and manifest_data.get("source_snapshot") == snapshot_label
+                            and manifest_data.get("filename") == filename
+                            and manifest_data.get("bytes") == existing_file.stat().st_size
+                            and isinstance(stored_hash, str)
+                            and calculate_sha256_file(existing_file) == stored_hash
+                        ):
+                            logger.info(
+                                "Skip policy active: found a valid stored artifact for "
+                                f"{snapshot_label} at {existing_file}. Skipping download."
+                            )
+                            return 0
+                    except (OSError, ValueError, json.JSONDecodeError) as exc:
+                        logger.warning(f"Could not validate existing artifact at {existing_run}: {exc}")
+
+    # Allocate exclusive partition directory
     utc_now = datetime.now(timezone.utc)
-    date_partition = utc_now.strftime("%Y-%m-%d")
-    run_id = f"run_{utc_now.strftime('%Y%m%dT%H%M%SZ')}"
-    destination_dir = raw_base / "citibike_trips" / f"ingest_date={date_partition}" / run_id
+    run_id, destination_dir = create_unique_run_dir(raw_base, utc_now)
     target_file_path = destination_dir / filename
     manifest_path = destination_dir / "manifest.json"
 
@@ -252,24 +319,33 @@ def run_ingestion(
         )
     except Exception as e:
         logger.error(f"Download failed: {e}")
-        # Record failed manifest if destination directory exists
-        try:
-            fail_manifest = create_manifest(
-                dataset="citibike_trips",
-                source_url=target_url,
-                source_snapshot=snapshot_label,
-                run_id=run_id,
-                filename=filename,
-                bytes_count=0,
-                sha256="",
-                destination=str(target_file_path),
-                status="failed",
-                notes=f"Error: {e}",
-            )
-            write_manifest_atomic(fail_manifest, manifest_path)
-        except Exception:
-            pass
+        # Clean up empty run directory so incomplete runs do not pollute storage
+        if destination_dir.exists():
+            try:
+                for f in destination_dir.iterdir():
+                    f.unlink()
+                destination_dir.rmdir()
+            except Exception:
+                pass
         return 1
+
+    # Verify ZIP integrity if file is a zip archive
+    if filename.lower().endswith(".zip"):
+        try:
+            with zipfile.ZipFile(target_file_path, "r") as zf:
+                bad_member = zf.testzip()
+                if bad_member:
+                    raise ValueError(f"Corrupt ZIP member CRC: {bad_member}")
+        except Exception as ze:
+            logger.error(f"ZIP archive integrity check failed: {ze}")
+            if target_file_path.exists():
+                target_file_path.unlink()
+            if destination_dir.exists():
+                try:
+                    destination_dir.rmdir()
+                except Exception:
+                    pass
+            return 1
 
     # Calculate SHA-256
     logger.info("Computing SHA-256 checksum on downloaded artifact...")
@@ -280,7 +356,7 @@ def run_ingestion(
     total_records = None
     notes = None
     if count_records and filename.lower().endswith(".zip"):
-        logger.info("Scanning ZIP archive for internal CSV record counts (streaming)...")
+        logger.info("Scanning ZIP archive for internal CSV record counts (csv.reader)...")
         rec_count, csvs = count_records_in_zip(target_file_path)
         total_records = rec_count
         if total_records is not None:
@@ -288,9 +364,19 @@ def run_ingestion(
             notes = f"Internal CSV files: {len(csvs)} files ({', '.join(csvs)})"
         else:
             logger.warning("Record count could not be safely derived from ZIP archive.")
+            notes = "Record count: unknown / not derived"
 
     # Write Manifest
     logger.info(f"Generating manifest at {manifest_path}...")
+    try:
+        dest_str = (
+            str(target_file_path.relative_to(project_root))
+            if target_file_path.is_relative_to(project_root)
+            else str(target_file_path)
+        )
+    except Exception:
+        dest_str = str(target_file_path)
+
     manifest = create_manifest(
         dataset="citibike_trips",
         source_url=target_url,
@@ -299,7 +385,7 @@ def run_ingestion(
         filename=filename,
         bytes_count=bytes_downloaded,
         sha256=checksum,
-        destination=str(target_file_path.relative_to(project_root) if target_file_path.is_relative_to(project_root) else target_file_path),
+        destination=dest_str,
         status="success",
         record_count=total_records,
         pipeline_version=PIPELINE_VERSION,
@@ -366,6 +452,11 @@ def main() -> None:
         help="Perform HTTP header check only without downloading data files.",
     )
     parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip download if a prior successful artifact for the same monthly snapshot validates against its manifest.",
+    )
+    parser.add_argument(
         "--no-record-count",
         action="store_true",
         help="Skip uncompressing and counting records inside ZIP archive.",
@@ -379,9 +470,18 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Validate month if supplied
+    # Input validations
+    if args.timeout <= 0:
+        print(f"Error: --timeout must be positive, got {args.timeout}", file=sys.stderr)
+        sys.exit(1)
+    if args.max_download_mb <= 0:
+        print(f"Error: --max-download-mb must be positive, got {args.max_download_mb}", file=sys.stderr)
+        sys.exit(1)
     if args.month is not None and not (1 <= args.month <= 12):
         print(f"Error: Month must be between 1 and 12, got {args.month}", file=sys.stderr)
+        sys.exit(1)
+    if args.year is not None and (args.year < 2013 or args.year > 2035):
+        print(f"Error: Year must be between 2013 and 2035, got {args.year}", file=sys.stderr)
         sys.exit(1)
 
     code = run_ingestion(
@@ -393,6 +493,7 @@ def main() -> None:
         timeout=args.timeout,
         max_download_mb=args.max_download_mb,
         dry_run=args.dry_run,
+        skip_existing=args.skip_existing,
         count_records=not args.no_record_count,
         log_file=args.log_file,
     )

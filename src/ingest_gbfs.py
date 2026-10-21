@@ -24,10 +24,11 @@ if str(project_root) not in sys.path:
 
 from src.common.config import PipelineConfig
 from src.common.hashing import calculate_sha256_file
-from src.common.logging_utils import setup_logger
+from src.common.logging_utils import setup_logger, sanitize_url
 from src.common.manifest import create_manifest, write_manifest_atomic
 
 PIPELINE_VERSION = "0.1.0"
+MAX_FEED_BYTES = 50 * 1024 * 1024  # 50 MB safety ceiling for JSON responses
 
 
 def discover_feeds(
@@ -58,7 +59,8 @@ def discover_feeds(
     session.mount("https://", adapter := HTTPAdapter(max_retries=retries))
     session.mount("http://", adapter)
 
-    logger.info(f"Discovering GBFS feeds from root endpoint: {root_url}")
+    sanitized_root = sanitize_url(root_url)
+    logger.info(f"Discovering GBFS feeds from root endpoint: {sanitized_root}")
     resp = session.get(root_url, timeout=timeout)
     if resp.status_code != 200:
         raise requests.HTTPError(f"Root GBFS endpoint returned HTTP {resp.status_code}")
@@ -68,7 +70,6 @@ def discover_feeds(
     logger.info(f"Advertised GBFS Version: {version}")
 
     data_section = root_data.get("data", {})
-    # Look for language key (e.g. data['en']['feeds']) or direct 'feeds' list
     feeds_list = []
     if preferred_lang in data_section and "feeds" in data_section[preferred_lang]:
         feeds_list = data_section[preferred_lang]["feeds"]
@@ -116,31 +117,65 @@ def fetch_and_save_json(
     temp_path = target_path.with_suffix(f"{target_path.suffix}.tmp")
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with session.get(url, timeout=timeout) as resp:
-        if resp.status_code != 200:
-            raise requests.HTTPError(f"HTTP {resp.status_code} fetching feed {url}")
+    sanitized_url = sanitize_url(url)
+    try:
+        with session.get(url, timeout=timeout, stream=True) as resp:
+            if resp.status_code != 200:
+                raise requests.HTTPError(f"HTTP {resp.status_code} fetching feed {sanitized_url}")
 
-        raw_bytes = resp.content
-        if not raw_bytes:
-            raise ValueError(f"Received empty response from {url}")
+            bytes_written = 0
+            with open(temp_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        f.write(chunk)
+                        bytes_written += len(chunk)
+                        if bytes_written > MAX_FEED_BYTES:
+                            raise ValueError(
+                                f"GBFS response exceeded safety ceiling of {MAX_FEED_BYTES / (1024 * 1024)} MB."
+                            )
 
-        # Attempt to derive station count from data.stations if present
-        station_count = None
+            if bytes_written == 0:
+                raise ValueError(f"Received empty response from {sanitized_url}")
+
+            # Validate that saved file is valid JSON and extract station count
+            station_count = None
+            with open(temp_path, "r", encoding="utf-8") as f:
+                parsed = json.load(f)
+                stations = parsed.get("data", {}).get("stations")
+                if isinstance(stations, list):
+                    station_count = len(stations)
+
+            # Atomic rename
+            temp_path.replace(target_path)
+            return bytes_written, station_count
+    except Exception:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+        raise
+
+
+def create_unique_gbfs_dir(base_dir: Path, utc_now: datetime) -> Tuple[str, Path]:
+    """Generate collision-free run ID and create exclusive partition directory."""
+    date_partition = utc_now.strftime("%Y-%m-%d")
+    base_timestamp = utc_now.strftime("%Y%m%dT%H%M%S")
+    microsec = utc_now.microsecond
+
+    parent_partition = base_dir / "gbfs" / f"ingest_date={date_partition}"
+    parent_partition.mkdir(parents=True, exist_ok=True)
+
+    counter = 0
+    while True:
+        suffix = f"_{counter:02d}" if counter > 0 else ""
+        run_id = f"run_{base_timestamp}_{microsec:06d}Z{suffix}"
+        target_dir = parent_partition / run_id
         try:
-            parsed = json.loads(raw_bytes.decode("utf-8"))
-            stations = parsed.get("data", {}).get("stations")
-            if isinstance(stations, list):
-                station_count = len(stations)
-        except Exception:
-            pass
-
-        with open(temp_path, "wb") as f:
-            f.write(raw_bytes)
-            f.flush()
-            os.fsync(f.fileno())
-
-        temp_path.replace(target_path)
-        return len(raw_bytes), station_count
+            target_dir.mkdir(parents=True, exist_ok=False)
+            return run_id, target_dir
+        except FileExistsError:
+            counter += 1
 
 
 def run_gbfs_ingestion(
@@ -160,7 +195,7 @@ def run_gbfs_ingestion(
     logger.info("==================================================")
     logger.info("       CitiBike GBFS Live Snapshot Ingestion      ")
     logger.info("==================================================")
-    logger.info(f"GBFS Root URL    : {root_url}")
+    logger.info(f"GBFS Root URL    : {sanitize_url(root_url)}")
     logger.info(f"Snapshots Root   : {snapshots_base}")
     logger.info(f"Dry-run Mode     : {dry_run}")
 
@@ -178,29 +213,28 @@ def run_gbfs_ingestion(
         logger.error(f"Failed to discover GBFS feeds: {e}")
         return 1
 
-    required_feeds = ["station_information", "station_status"]
+    # Use required_feeds from configuration
+    required_feeds = config.gbfs.required_feeds or ["station_information", "station_status"]
     missing = [f for f in required_feeds if f not in feeds]
     if missing:
         logger.error(f"Missing required feeds from GBFS discovery: {missing}. Available: {list(feeds.keys())}")
         return 1
 
     for feed_name in required_feeds:
-        logger.info(f"Discovered {feed_name}: {feeds[feed_name]}")
+        logger.info(f"Discovered {feed_name}: {sanitize_url(feeds[feed_name])}")
 
     if dry_run:
         logger.info("[DRY RUN] Feed endpoints successfully discovered. Skipping download.")
         return 0
 
-    # Build immutable partition directory
+    # Build collision-free partition directory
     utc_now = datetime.now(timezone.utc)
-    date_partition = utc_now.strftime("%Y-%m-%d")
-    run_id = f"run_{utc_now.strftime('%Y%m%dT%H%M%SZ')}"
-    destination_dir = snapshots_base / "gbfs" / f"ingest_date={date_partition}" / run_id
-    destination_dir.mkdir(parents=True, exist_ok=True)
+    run_id, destination_dir = create_unique_gbfs_dir(snapshots_base, utc_now)
 
     manifest_records: List[Dict[str, Any]] = []
 
     # Fetch each required feed snapshot
+    all_success = True
     for feed_name in required_feeds:
         target_url = feeds[feed_name]
         filename = f"{feed_name}.json"
@@ -219,6 +253,15 @@ def run_gbfs_ingestion(
             checksum = calculate_sha256_file(target_file)
             logger.info(f"Saved {bytes_saved:,} bytes. SHA-256: {checksum}. Stations: {station_count}")
 
+            try:
+                dest_str = (
+                    str(target_file.relative_to(project_root))
+                    if target_file.is_relative_to(project_root)
+                    else str(target_file)
+                )
+            except Exception:
+                dest_str = str(target_file)
+
             manifest_entry = create_manifest(
                 dataset=f"gbfs_{feed_name}",
                 source_url=target_url,
@@ -227,7 +270,7 @@ def run_gbfs_ingestion(
                 filename=filename,
                 bytes_count=bytes_saved,
                 sha256=checksum,
-                destination=str(target_file.relative_to(project_root) if target_file.is_relative_to(project_root) else target_file),
+                destination=dest_str,
                 status="success",
                 record_count=station_count,
                 pipeline_version=PIPELINE_VERSION,
@@ -236,6 +279,7 @@ def run_gbfs_ingestion(
             manifest_records.append(manifest_entry)
         except Exception as e:
             logger.error(f"Failed to fetch {feed_name}: {e}")
+            all_success = False
             fail_entry = create_manifest(
                 dataset=f"gbfs_{feed_name}",
                 source_url=target_url,
@@ -243,7 +287,7 @@ def run_gbfs_ingestion(
                 run_id=run_id,
                 filename=filename,
                 bytes_count=0,
-                sha256="",
+                sha256="0" * 64,
                 destination=str(target_file),
                 status="failed",
                 notes=f"Error: {e}",
@@ -255,8 +299,7 @@ def run_gbfs_ingestion(
     write_manifest_atomic(manifest_records, manifest_path)
     logger.info(f"Snapshot manifest written successfully: {manifest_path}")
 
-    success_count = sum(1 for r in manifest_records if r["status"] == "success")
-    if success_count == len(required_feeds):
+    if all_success:
         logger.info("==================================================")
         logger.info("GBFS Ingestion Finished Successfully [OK]")
         logger.info("==================================================")
@@ -301,6 +344,10 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    if args.timeout <= 0:
+        print(f"Error: --timeout must be positive, got {args.timeout}", file=sys.stderr)
+        sys.exit(1)
+
     code = run_gbfs_ingestion(
         feed_url=args.feed_url,
         snapshots_root=args.snapshots_root,

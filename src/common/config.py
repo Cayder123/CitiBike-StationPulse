@@ -5,6 +5,7 @@ Resolves settings with precedence: CLI Arguments > Environment Variables > Confi
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,8 @@ try:
     import yaml
 except ImportError:
     yaml = None  # type: ignore
+
+logger = logging.getLogger("stationpulse.config")
 
 
 @dataclass
@@ -45,15 +48,20 @@ class PipelineConfig:
 
     @classmethod
     def load(cls, config_path: Optional[Path | str] = None) -> PipelineConfig:
-        """Load configuration from file, falling back to env vars and defaults."""
+        """Load configuration from file, falling back to env vars and defaults.
+
+        Raises:
+            ValueError: If an explicitly provided config file does not exist or has invalid YAML syntax.
+        """
         config = cls()
 
-        # Try to load YAML file if provided or default exists
-        candidate_paths = [
-            Path(config_path) if config_path else None,
-            Path("config/project.yaml"),
-            Path("config/project.example.yaml"),
-        ]
+        # If explicit config_path is provided, it must exist
+        explicit_mode = config_path is not None
+        candidate_paths = (
+            [Path(config_path)]
+            if explicit_mode
+            else [Path("config/project.yaml"), Path("config/project.example.yaml")]
+        )
 
         found_yaml_path = None
         for p in candidate_paths:
@@ -61,46 +69,61 @@ class PipelineConfig:
                 found_yaml_path = p
                 break
 
-        if found_yaml_path and yaml:
-            try:
-                with open(found_yaml_path, "r", encoding="utf-8") as f:
-                    raw_data = yaml.safe_load(f) or {}
+        if explicit_mode and not found_yaml_path:
+            raise FileNotFoundError(f"Config file not found at explicitly requested path: {config_path}")
+
+        if found_yaml_path:
+            if yaml is None:
+                logger.warning(
+                    f"PyYAML is not installed. Skipping YAML config parsing from {found_yaml_path}."
+                )
+            else:
+                try:
+                    with open(found_yaml_path, "r", encoding="utf-8") as f:
+                        raw_data = yaml.safe_load(f) or {}
+                except Exception as e:
+                    msg = f"Failed to parse YAML configuration at {found_yaml_path}: {e}"
+                    if explicit_mode:
+                        raise ValueError(msg) from e
+                    logger.warning(f"{msg}. Falling back to default configuration.")
+                    raw_data = {}
+
                 storage = raw_data.get("storage", {})
-                if "raw_root" in storage:
+                if "raw_root" in storage and storage["raw_root"]:
                     config.raw_root = Path(storage["raw_root"])
-                if "snapshots_root" in storage:
+                if "snapshots_root" in storage and storage["snapshots_root"]:
                     config.snapshots_root = Path(storage["snapshots_root"])
-                if "logs_root" in storage:
+                if "logs_root" in storage and storage["logs_root"]:
                     config.logs_root = Path(storage["logs_root"])
 
                 network = raw_data.get("network", {})
-                if "timeout_seconds" in network:
+                if "timeout_seconds" in network and network["timeout_seconds"] is not None:
                     config.timeout_seconds = int(network["timeout_seconds"])
-                if "max_download_mb" in network:
+                if "max_download_mb" in network and network["max_download_mb"] is not None:
                     config.max_download_mb = int(network["max_download_mb"])
-                if "max_retries" in network:
+                if "max_retries" in network and network["max_retries"] is not None:
                     config.max_retries = int(network["max_retries"])
-                if "retry_backoff_factor" in network:
+                if "retry_backoff_factor" in network and network["retry_backoff_factor"] is not None:
                     config.retry_backoff_factor = float(network["retry_backoff_factor"])
 
                 sources = raw_data.get("data_sources", {})
                 gbfs = sources.get("gbfs", {})
-                if "root_url" in gbfs:
+                if "root_url" in gbfs and gbfs["root_url"]:
                     config.gbfs.root_url = str(gbfs["root_url"])
-                if "preferred_language" in gbfs:
+                if "preferred_language" in gbfs and gbfs["preferred_language"]:
                     config.gbfs.preferred_language = str(gbfs["preferred_language"])
+                if "required_feeds" in gbfs and isinstance(gbfs["required_feeds"], list):
+                    config.gbfs.required_feeds = list(gbfs["required_feeds"])
 
                 trips = sources.get("trips", {})
-                if "base_url" in trips:
+                if "base_url" in trips and trips["base_url"]:
                     config.trips.base_url = str(trips["base_url"])
-                if "default_dataset" in trips:
+                if "default_dataset" in trips and trips["default_dataset"]:
                     config.trips.default_dataset = str(trips["default_dataset"])
-                if "default_year" in trips:
+                if "default_year" in trips and trips["default_year"] is not None:
                     config.trips.default_year = int(trips["default_year"])
-                if "default_month" in trips:
+                if "default_month" in trips and trips["default_month"] is not None:
                     config.trips.default_month = int(trips["default_month"])
-            except Exception:
-                pass
 
         # Environment variable overrides
         if raw_env := os.getenv("STATIONPULSE_RAW_ROOT"):

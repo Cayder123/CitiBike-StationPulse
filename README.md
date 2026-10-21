@@ -7,21 +7,20 @@
 
 StationPulse là pipeline kỹ thuật dữ liệu học thuật được xây dựng bằng **PySpark** nhằm phân tích quy luật di chuyển, nhu cầu sử dụng hệ thống xe đạp chia sẻ **Citi Bike** (New York City & New Jersey), đồng thời đánh giá hiện tượng mất cân bằng trạm (thiếu xe / thiếu chỗ trả dock) theo thời gian.
 
-Dự án được thiết kế cho nhóm **5 sinh viên** làm việc song song, bám sát yêu cầu đồ án:
+Dự án được thiết kế cho nhóm **4 sinh viên** làm việc song song, bám sát yêu cầu đồ án:
 - **Buổi 6 (Hiện tại)**: Thiết lập môi trường chuẩn, Ingestion đáng tin cậy (streaming, backoff, atomic rename, SHA-256), lưu trữ Raw bất biến theo partition, sinh Manifest truy vết nguồn gốc, chạy lại (rerun) an toàn không ghi đè, và xác minh dữ liệu thô bằng PySpark DataFrame.
 - **Buổi 7 (Kế tiếp)**: Chuyển đổi và tổng hợp dữ liệu với Spark DataFrame / Spark SQL, tính toán chỉ số Net-Flow trạm theo giờ và mô hình hóa mất cân bằng trạm.
 
 ---
 
-## 1. Phân chia công việc nhóm 5 người (5-Person Team Split)
+## 1. Phân chia công việc nhóm 4 người (Four-Person Team Split)
 
 | Thành viên | Vai trò | Trách nhiệm chính | File phụ trách | Nhánh đề xuất |
 | :--- | :--- | :--- | :--- | :--- |
-| **Member 1** | **Coordinator & Integration** | Quy chuẩn repo, freeze cấu hình, điều phối PR, tag checkpoint | `README.md`, `config/`, `pyproject.toml`, `src/common/` | `feat/coordinator-integration` |
-| **Member 2** | **Spark Environment** | Kiểm tra môi trường (Python, Java, PySpark), smoke test, tài liệu setup | `src/env_check.py`, `requirements.txt` | `feat/spark-environment` |
-| **Member 3** | **Historical Trips Ingestion** | Tải streaming dữ liệu chuyến đi, retry có backoff, ghi atomic, mã băm SHA-256, xử lý ZIP nhiều CSV | `src/ingest_trips.py`, `tests/test_rerun_policy.py` | `feat/trips-ingestion` |
-| **Member 4** | **GBFS Feeds & Raw Verify** | Tự động phát hiện endpoint qua `gbfs.json`, chụp snapshot JSON, xác thực schema Spark (`printSchema`, `count`, `show`) | `src/ingest_gbfs.py`, `src/raw_verify.py` | `feat/gbfs-raw-verify` |
-| **Member 5** | **Architecture & Presentation** | Sơ đồ kiến trúc, checklist bằng chứng Buổi 6, slide báo cáo (6 slide, ≤ 4 phút) | `docs/architecture.md`, `docs/evidence_checklist.md`, slide | `docs/slides-architecture` |
+| **Người 1** | **Điều phối & tích hợp** | Hợp đồng chung, config, manifest, README, PR review, end-to-end và tag checkpoint | `README.md`, `CONTRIBUTING.md`, `config/`, `src/common/`, tích hợp | `feat/coordinator-integration` |
+| **Người 2** | **Môi trường Spark & QA** | Python/Java/PySpark, smoke test 1M, dependency, tests và evidence môi trường | `src/env_check.py`, `requirements.txt`, `pyproject.toml`, `tests/` | `feat/spark-qa` |
+| **Người 3** | **Ingestion chuyến đi lịch sử** | Tải theo tháng, retry, atomic write, SHA-256, manifest, ZIP nhiều CSV và rerun an toàn | `src/ingest_trips.py`, tests ingestion/rerun | `feat/trips-ingestion` |
+| **Người 4** | **GBFS, Raw Verify & trình bày** | Discovery GBFS, snapshot, Spark raw verify, sơ đồ, evidence checklist, 6 slide và pitch ≤4 phút | `src/ingest_gbfs.py`, `src/raw_verify.py`, `docs/` | `feat/gbfs-raw-verify-docs` |
 
 Chi tiết quy trình làm việc và tiêu chí nghiệm thu được lưu tại [`docs/team_work_split.md`](docs/team_work_split.md).
 
@@ -54,7 +53,7 @@ CitiBike-StationPulse/
 ├── docs/
 │   ├── architecture.md       # Sơ đồ kiến trúc Mermaid & luồng dữ liệu
 │   ├── data_dictionary.md    # Từ điển dữ liệu Trip CSV & GBFS JSON
-│   ├── team_work_split.md    # Phân công chi tiết và quy trình PR cho 5 người
+│   ├── team_work_split.md    # Phân công chi tiết và quy trình PR cho 4 người
 │   ├── evidence_checklist.md # Checklist bằng chứng nghiệm thu Buổi 6 & dàn ý slide
 │   └── analysis_questions.md # Định hướng phân tích và công thức Net-Flow Buổi 7
 ├── data/
@@ -115,7 +114,7 @@ Hệ thống đi kèm bộ kiểm thử không phụ thuộc mạng (100% mocked
 ```powershell
 python -m pytest tests -v
 ```
-*(Kết quả: 11/11 bài test đã vượt qua thành công bao gồm hashing, manifest schema, atomic write, zip line count, và rerun isolation).*
+*(Kết quả: 23/23 bài test đã vượt qua thành công bao gồm hashing, manifest schema, atomic write, zip line count, rerun isolation, zip slip prevention, URL/log sanitization, và spark raw verify).*
 
 ### Bước 3: Ingestion dữ liệu lịch sử chuyến đi (Historical Trips)
 CLI hỗ trợ tham số `--dry-run` để kiểm tra kết nối và kích thước file trước khi tải thực tế:
@@ -149,13 +148,29 @@ Dữ liệu được lưu tại:
 Chạy script xác minh để Spark đọc tệp thô, in schema, đếm số dòng và hiển thị 5 dòng đầu:
 
 ```powershell
-# Xác thực file ZIP vừa tải (hoặc file JSON snapshot)
-python src/raw_verify.py --path data/raw/citibike_trips/ingest_date=2026-10-20/run_*/JC-202401-citibike-tripdata.csv.zip --log-file logs/raw_verify.txt
+# Xác thực file ZIP vừa tải (chỉ định đường dẫn cụ thể từ output ingestion, hoặc dùng wildcard trong dấu ngoặc kép)
+python src/raw_verify.py --path "data/raw/citibike_trips/ingest_date=*/run_*/JC-202401-citibike-tripdata.csv.zip" --log-file logs/raw_verify.txt
+# (Lưu ý: CLI hỗ trợ tự động tìm partition mới nhất nếu truyền pattern chứa wildcard)
 ```
+
+### Bằng chứng chạy thực tế — JC 2024-01 (2026-10-21)
+
+Nhóm đã tải và xác minh thành công một archive Jersey City tháng 01/2024. Manifest ghi `status: success`, `record_count: 50661`; Spark đọc schema, hiển thị 5 dòng mẫu, đếm **50.661 dòng** và dừng sạch. ZIP hợp lệ, chứa một CSV dữ liệu cùng một file metadata `__MACOSX`.
+
+- Run ID: `run_20261021T014618_890189Z`
+- Kích thước: `1,883,296` bytes
+- SHA-256: `d59d149f200fb81e204099afb0f76f1b02267bb2d605e92309e6f9974b176e15`
+- Manifest: `data/raw/citibike_trips/ingest_date=2026-10-21/run_20261021T014618_890189Z/manifest.json`
+- Kết quả verifier: `Raw ZIP and All Internal CSVs Spark Verified [OK]`
+
+Đây là bằng chứng cho **một lần ingest và Spark verify**; chưa đại diện cho kiểm tra rerun ba lần hoặc GBFS. Sau lần chạy ban đầu, verifier đã được chạy lại trên cùng archive với `--log-file logs/raw_verify.txt`; lần xác minh này cũng đếm được 50.661 dòng và kết thúc `[OK]`. Dữ liệu Raw và logs được `.gitignore` loại khỏi Git, không commit các file đó.
 
 ---
 
 ## 5. Cấu trúc Manifest mẫu (`manifest.json`)
+
+> [!NOTE]
+> Đoạn JSON dưới đây là **ví dụ minh họa về cấu trúc lược đồ (schema structure example)**, không phải bằng chứng chạy thực tế. Khi chạy thực tế, manifest sẽ chứa mã băm SHA-256 thật, dung lượng byte và commit hash thực tế tương ứng với file artifact trên máy.
 
 Mỗi phân vùng dữ liệu thô luôn đi kèm một file `manifest.json` nguyên tử:
 

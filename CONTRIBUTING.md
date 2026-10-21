@@ -1,6 +1,6 @@
 # Contributing to CitiBike-StationPulse
 
-Welcome to the team! To ensure a smooth, conflict-free development experience for all 5 team members, please adhere to the following workflow and guidelines.
+Welcome to the team! To ensure a smooth, conflict-free development experience for all 4 team members, please adhere to the following workflow and guidelines.
 
 ---
 

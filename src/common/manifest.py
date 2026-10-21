@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+
+from src.common.logging_utils import sanitize_url
 
 MANIFEST_SCHEMA_VERSION = "1.0.0"
 
@@ -32,6 +35,8 @@ REQUIRED_MANIFEST_FIELDS = {
     "git_commit",
     "notes",
 }
+
+_HEX_64_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 @dataclass
@@ -102,10 +107,26 @@ def validate_manifest_dict(data: Dict[str, Any]) -> bool:
         raise ValueError(f"Manifest missing required keys: {sorted(list(missing))}")
 
     if data["status"] not in ("success", "skipped", "failed"):
-        raise ValueError(f"Invalid manifest status: {data['status']}. Must be 'success', 'skipped', or 'failed'.")
+        raise ValueError(
+            f"Invalid manifest status: {data['status']}. Must be 'success', 'skipped', or 'failed'."
+        )
 
-    if not isinstance(data["bytes"], int) or (data["status"] == "success" and data["bytes"] < 0):
+    if not isinstance(data["bytes"], int) or data["bytes"] < 0:
         raise ValueError(f"Manifest 'bytes' must be a non-negative integer, got {data['bytes']}")
+
+    if data["status"] == "success":
+        if data["bytes"] <= 0:
+            raise ValueError(f"Successful manifest must have positive byte count, got {data['bytes']}")
+        if not isinstance(data["sha256"], str) or not _HEX_64_PATTERN.match(data["sha256"]):
+            raise ValueError(
+                f"Successful manifest requires valid 64-character hex SHA-256 string, got: {data['sha256']!r}"
+            )
+
+    if data["record_count"] is not None:
+        if not isinstance(data["record_count"], int) or data["record_count"] < 0:
+            raise ValueError(
+                f"Manifest 'record_count' must be a non-negative integer or None, got: {data['record_count']}"
+            )
 
     return True
 
@@ -133,10 +154,12 @@ def create_manifest(
     if git_commit is None:
         git_commit = get_git_commit_hash()
 
+    sanitized_source = sanitize_url(source_url)
+
     record = ManifestRecord(
         schema_version=MANIFEST_SCHEMA_VERSION,
         dataset=dataset,
-        source_url=source_url,
+        source_url=sanitized_source,
         source_snapshot=source_snapshot,
         ingested_at_utc=ingested_at_utc,
         run_id=run_id,
@@ -155,7 +178,10 @@ def create_manifest(
     return manifest_dict
 
 
-def write_manifest_atomic(manifest_data: Union[Dict[str, Any], List[Dict[str, Any]]], target_path: Union[str, Path]) -> Path:
+def write_manifest_atomic(
+    manifest_data: Union[Dict[str, Any], List[Dict[str, Any]]],
+    target_path: Union[str, Path],
+) -> Path:
     """Atomically write manifest data to JSON file using a temporary file.
 
     Args:
@@ -168,6 +194,13 @@ def write_manifest_atomic(manifest_data: Union[Dict[str, Any], List[Dict[str, An
     path = Path(target_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_suffix(".tmp")
+
+    # If list of dicts, validate all items
+    if isinstance(manifest_data, list):
+        for item in manifest_data:
+            validate_manifest_dict(item)
+    else:
+        validate_manifest_dict(manifest_data)
 
     with temp_path.open("w", encoding="utf-8") as f:
         json.dump(manifest_data, f, indent=2, ensure_ascii=False)
