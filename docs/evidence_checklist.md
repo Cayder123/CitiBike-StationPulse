@@ -6,16 +6,16 @@ Checklist này dùng để chuẩn bị nghiệm thu Checkpoint 2. Trạng thái
 
 | Hạng mục | Yêu cầu | Owner chính | Bằng chứng cần lưu | Trạng thái |
 |---|---|---|---|---|
-| Environment | Python/Java/PySpark/Spark version; `spark.range(1_000_000).count()`; exit code 0 | Nhóm | `logs/env_check.txt`: Python 3.11.9, Java 21.0.8, PySpark/Spark 3.5.9; 1,000,000 rows | Đạt — log PASS ngày 2026-10-21 |
-| Source | URL chính thức, tháng/snapshot, license/terms, dung lượng và quyền truy cập | Nhóm | System Data URL, S3 archive `JC-202401`, 1,883,296 bytes; policy link trong README | Đạt — snapshot xác định, HTTP 200 |
+| Environment | Python/Java/PySpark/Spark version; `spark.range(1_000_000).count()`; exit code 0 | Nhóm | Evidence gốc 2026-10-21: Python 3.11.9; lần chạy lại 2026-10-23: Python 3.12.14, Java 21.0.8, PySpark/Spark 3.5.9; 1,000,000 rows | Đạt — smoke test PASS trong `.venv` đã dựng lại ngày 2026-10-23 |
+| Source | URL chính thức, tháng/snapshot, license/terms, dung lượng và quyền truy cập | Nhóm | System Data URL, S3 archive `JC-202401`, 1,883,296 bytes; policy link trong README | Đạt — dry-run ngày 2026-10-23 nhận HTTP 200 và Content-Length khớp |
 | Ingestion | Tải tự động, timeout/retry hữu hạn, kiểm tra payload, atomic write, SHA-256 | Nhóm | Log terminal ngày 2026-10-21; manifest và checksum | Đạt — một lần tải thật |
 | Raw Storage | Dữ liệu nguyên bản, file >0 byte, cấu trúc theo ngày/run, không overwrite | Nhóm | Partition `ingest_date=2026-10-21/run_20261021T014618_890189Z`; ZIP 1,883,296 bytes | Đạt — tồn tại cục bộ, được gitignore |
 | Manifest | Source, UTC timestamp, bytes, row count hoặc unknown, SHA-256, run_id, destination, status | Nhóm | Manifest trong run partition; hash/bytes/rows khớp verifier | Đạt — các trường rubric và hash/bytes/rows khớp; `git_commit` lưu HEAD lúc ingest, lineage chính xác tới checkpoint chỉ là phần bổ sung |
 | Logs | Log có thời gian UTC, lỗi rõ; không lộ token/header/secret | Nhóm | `logs/env_check.txt`, `logs/raw_verify.txt`; các file nằm ngoài Git | Đạt — có log thực tế; logger sanitization có test |
-| Rerun safety | Giải thích hành vi khi chạy lại; mỗi lần tạo run mới hoặc skip cùng hash có kiểm tra | Nhóm | Mặc định mỗi lần chạy tạo partition riêng; unit test kiểm tra partition độc lập và skip policy | Đạt về hành vi — không cần tải cùng archive ba lần live; trong báo cáo giải thích kết quả ba lần chạy theo code/test |
+| Rerun safety | Giải thích hành vi khi chạy lại; mỗi lần tạo run mới hoặc skip cùng hash có kiểm tra | Nhóm | Test xác nhận helper tạo tên run không trùng và fixtures mô phỏng các partition; chưa có unit test gọi trực tiếp `--skip-existing` | Policy mặc định có code; nếu muốn trình bày skip, bổ sung test nhánh này hoặc chạy demo và lưu log |
 | GBFS snapshot | Discovery từ endpoint chính thức, resolve version/feed thực tế, snapshot station info/status | Nhóm | Chưa có JSON snapshot; chỉ có dry-run discovery theo báo cáo trước | Chưa có snapshot — phần mở rộng, không thuộc 5 artifact cốt lõi |
-| Spark Raw Read | Format hỗ trợ đọc được; `printSchema()`, `count()`, `show(5)`; Spark dừng sạch | Nhóm | `logs/raw_verify.txt`; 50,661 dòng, schema và 5 mẫu, Spark dừng sạch | Đạt — xác minh thật ngày 2026-10-21 |
-| Repo & release | README, cấu trúc repo, không có Raw/log/secret, có commit hoặc tag để truy vết | Nhóm | Commit Checkpoint 2 hiện có; Raw/log không được track | Đạt ở commit cục bộ; tag riêng là tùy chọn. Bản rà soát tài liệu cần commit cùng repo trước khi nộp phiên bản cuối |
+| Spark Raw Read | Format hỗ trợ đọc được; `printSchema()`, `count()`, `show(5)`; Spark dừng sạch | Nhóm | `logs/raw_verify.txt`; lần chạy lại 2026-10-23 xác nhận 50,661 dòng, schema và 5 mẫu | Đạt — verifier PASS ngày 2026-10-23 |
+| Repo & release | README, cấu trúc repo, không có Raw/log/secret, có commit hoặc tag để truy vết | Nhóm | Commit cuối cần chứa code/tài liệu đã duyệt; Raw/log không được track | Checklist sạch; ghi hash của commit bàn giao trong báo cáo. Tag riêng là tùy chọn |
 
 ### Bằng chứng lần chạy thực tế — Jersey City, 2024-01
 
@@ -31,7 +31,7 @@ Checklist này dùng để chuẩn bị nghiệm thu Checkpoint 2. Trạng thái
 ### Thông tin nhóm cần chốt trước khi nộp báo cáo
 
 - Tên nhóm và danh sách thành viên để điền trang bìa/mẫu báo cáo.
-- Xác nhận JC tháng 01/2024 chỉ là snapshot minh chứng Checkpoint 2 hay cũng là phạm vi phân tích cuối; nếu làm phân tích rộng hơn, nhóm cần chốt thêm khoảng thời gian/dataset.
+- Phạm vi phân tích hiện đã chốt là JC tháng 01/2024 và script/output PySpark đã có. Nếu câu hỏi nghiên cứu cần kết luận rộng hơn một tháng hoặc riêng Jersey City, nhóm cần thống nhất thêm dữ liệu và quy tắc lọc station ngoài Jersey City/Hoboken.
 - Tùy chọn lineage: giữ nguyên run hiện có (manifest ghi HEAD tại thời điểm ingest) hoặc tạo run mới từ commit hiện hành nếu nhóm muốn manifest trỏ chính xác tới mã nguồn checkpoint. Các trường manifest bắt buộc của rubric đã có và khớp raw.
 - Ghi blocker lớn nhất còn lại cùng người phụ trách và hạn xử lý; nếu không có blocker, nêu rõ rủi ro trước Buổi 7 thay vì tự tạo blocker.
 
@@ -39,8 +39,8 @@ Checklist này dùng để chuẩn bị nghiệm thu Checkpoint 2. Trạng thái
 
 1. **Một lệnh kiểm tra môi trường:** `python src/env_check.py --log-file logs/env_check.txt`. Lệnh đã chạy thành công với Python 3.11.9, Java 21.0.8 và PySpark/Spark 3.5.9; Spark đếm đủ 1.000.000 dòng.
 2. **Nguồn và snapshot:** Citi Bike System Data, archive Jersey City tháng 01/2024 (`JC-202401-citibike-tripdata.csv.zip`), 1.883.296 byte; nguồn và điều khoản được dẫn trong README.
-3. **Nếu chạy ingest ba lần:** mặc định tạo ba `run_id`/partition bất biến riêng, không ghi đè; với `--skip-existing`, archive chỉ bị bỏ qua khi manifest thành công và tên file, snapshot, kích thước, SHA-256 cùng khớp. Unit test xác nhận chính sách; bằng chứng live hiện chứng minh một lần ingest.
-4. **Rủi ro lớn nhất trước Buổi 7:** phạm vi phân tích hiện mới có một snapshot Jersey City tháng 01/2024. Nhóm cần xác nhận đây chỉ là dữ liệu minh chứng Checkpoint 2 hay là phạm vi phân tích; nếu phân tích rộng hơn, chốt thêm tháng/khu vực và tải dữ liệu tương ứng. Ghi người phụ trách và hạn sau khi nhóm thống nhất.
+3. **Nếu chạy ingest ba lần:** mặc định tạo ba `run_id`/partition bất biến riêng, không ghi đè. `--skip-existing` kiểm tra manifest và hash trước khi bỏ qua, nhưng test suite hiện chưa gọi trực tiếp nhánh này. Bằng chứng live hiện chứng minh một lần ingest.
+4. **Rủi ro lớn nhất trước Buổi 7:** kết quả phân tích hiện chỉ mô tả một snapshot Jersey City tháng 01/2024, và archive có station endpoint ngoài Jersey City/Hoboken. Nếu câu hỏi cần xu hướng dài hạn hoặc kết quả chỉ cho NJ, cần thống nhất dữ liệu/tháng và quy tắc địa lý trước khi kết luận. Ghi người phụ trách và hạn sau khi nhóm thống nhất.
 
 ## 2. Bốn vai trò và người cung cấp evidence
 

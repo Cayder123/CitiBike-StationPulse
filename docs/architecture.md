@@ -4,9 +4,9 @@
 
 StationPulse is an academic big-data pipeline designed to analyze Citi Bike trip demand and evaluate station bike imbalance in the New York City / Jersey City metropolitan area using Apache Spark (PySpark).
 
-The architecture is partitioned into two distinct phases according to course milestones:
-- **Phase 1 (Buổi 6 - Current Focus)**: Environment setup, robust data ingestion, immutable raw storage, cryptographic audit manifests, log sanitization, safe rerun isolation, and PySpark raw data verification.
-- **Phase 2 (Buổi 7 - Extension)**: DataFrame transformations, hourly pickup/dropoff aggregations, net-flow station imbalance estimation, and analytical modeling.
+The project covers the Checkpoint 2 ingestion pipeline and an initial January 2024 analytics step:
+- **Checkpoint 2**: Environment setup, robust data ingestion, immutable raw storage, cryptographic audit manifests, log sanitization, safe rerun isolation, and PySpark raw data verification.
+- **Analytics**: PySpark hourly pickup/dropoff aggregations and station net-flow proxy for the `JC-202401` archive. Additional periods and modeling are outside the current scope.
 
 ---
 
@@ -34,8 +34,8 @@ flowchart TD
         RawVerify["raw_verify.py\n- Archive checksum & integrity\n- PySpark DataFrame read\n- printSchema(), count(), show(5)"]
     end
 
-    subgraph Analytics_Phase["5. Buổi 7 Spark Analytics (Future)"]
-        SparkTransform["Spark SQL & DataFrame\nNet-Flow = Dropoffs - Pickups\nProxy Imbalance Modeling"]
+    subgraph Analytics_Phase["5. January 2024 Spark Analytics"]
+        SparkTransform["PySpark DataFrame\nHourly arrivals/departures\nNet-flow proxy"]
     end
 
     S3 -->|HTTP GET Stream| TripIngest
@@ -48,7 +48,7 @@ flowchart TD
     RawGBFS -->|Inspect| RawVerify
     EnvCheck -->|Validates Cluster/Local| RawVerify
 
-    RawTrips -.->|Phase 2 Ingestion| SparkTransform
+    RawTrips -->|Analyze JC-202401| SparkTransform
 ```
 
 ---

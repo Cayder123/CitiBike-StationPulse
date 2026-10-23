@@ -4,18 +4,19 @@ StationPulse là dự án học thuật về kỹ thuật dữ liệu dùng **Py
 
 ## Trạng thái dự án
 
-Checkpoint 2 đã được chạy và xác minh trên Windows với Python 3.11.9, Java 21.0.8 và PySpark/Spark 3.5.9.
+Checkpoint 2 đã có evidence chạy thật trên Windows với Python 3.11.9, Java 21.0.8 và PySpark/Spark 3.5.9. Trong lần kiểm tra workspace ngày 2026-10-23, bộ test, environment check, raw verification và phân tích đều chạy bằng Python 3.12.14, Java 21.0.8 và PySpark/Spark 3.5.9.
 
 | Hạng mục | Kết quả đã ghi nhận |
 |---|---|
-| Environment | `spark.range(1_000_000).count()` hoàn tất thành công |
+| Environment | Smoke test `spark.range(1_000_000).count()` PASS; lần chạy lại 2026-10-23 dùng Python 3.12.14 |
 | Data source | Citi Bike, Jersey City, tháng 01/2024 (`JC-202401`) |
+| Source access | Dry-run ngày 2026-10-23 nhận HTTP 200; Content-Length 1.883.296 byte |
 | Ingestion | Tải archive thật thành công; 1.883.296 byte |
 | Raw integrity | ZIP hợp lệ; SHA-256 `d59d149f200fb81e204099afb0f76f1b02267bb2d605e92309e6f9974b176e15` |
-| Spark verification | Đọc schema, đếm được 50.661 dòng và hiển thị dữ liệu mẫu |
-| Automated tests | Lần chạy được ghi nhận: 23/23 test đạt |
+| Spark verification | Lần chạy lại 2026-10-23 đọc schema, đếm 50.661 dòng và hiển thị 5 dòng mẫu |
+| Automated tests | Lần chạy lại 2026-10-23: 23/23 test đạt |
 
-Các log và dữ liệu raw trên máy chạy được `.gitignore` loại khỏi Git. Hướng dẫn chạy lại để tái tạo evidence nằm ở phần [Chạy dự án](#chạy-dự-án). Checkpoint hiện tập trung vào ingestion và raw verification; phân tích net-flow là bước tiếp theo, chưa phải kết quả đã triển khai.
+Các log và dữ liệu raw trên máy chạy được `.gitignore` loại khỏi Git. Hướng dẫn chạy lại để tái tạo evidence nằm ở phần [Chạy dự án](#chạy-dự-án). Checkpoint 2 tập trung vào ingestion và raw verification; ngoài phạm vi checkpoint, script phân tích net-flow tháng 01/2024 hiện đã được triển khai và có output tái tạo được.
 
 ## Phạm vi và cách hiểu chỉ số
 
@@ -36,7 +37,7 @@ flowchart LR
     B --> D[Manifest: nguồn, thời gian, bytes, hash, trạng thái]
     C --> E[ZIP integrity check]
     E --> F[PySpark: schema, count, sample]
-    F -. Giai đoạn tiếp theo .-> G[Phân tích chuyến đi theo trạm và giờ]
+    F --> G[PySpark: tổng hợp lượt đi/đến, net-flow theo trạm và giờ]
 ```
 
 ## Cấu trúc repository
@@ -56,18 +57,19 @@ flowchart LR
 │   ├── env_check.py             # Kiểm tra môi trường và Spark smoke test
 │   ├── ingest_trips.py          # Tải archive chuyến đi theo tháng
 │   ├── ingest_gbfs.py           # Tải GBFS snapshot tùy chọn
-│   └── raw_verify.py            # Kiểm tra ZIP/CSV/JSON bằng Spark
+│   ├── raw_verify.py            # Kiểm tra ZIP/CSV/JSON bằng Spark
+│   └── analyze_trips.py         # Net-flow theo trạm/giờ cho JC-202401
 └── tests/                       # Unit test và Spark integration test
 ```
 
 ## Yêu cầu
 
-- Windows PowerShell (các ví dụ bên dưới), Git và Python 3.10 hoặc 3.11.
+- Windows PowerShell (các ví dụ bên dưới), Git và Python 3.10–3.12.
 - JDK 17 hoặc 21; cần `java -version` hoạt động trong terminal.
 - PySpark 3.5.x được cài từ `requirements.txt`.
 - Chạy Spark local (`local[*]`); không cần dựng Spark cluster.
 
-Phiên bản đã dùng để tạo evidence: Python 3.11.9, Java 21.0.8, PySpark/Spark 3.5.9.
+Phiên bản dùng cho lần chạy lại gần nhất: Python 3.12.14, Java 21.0.8, PySpark/Spark 3.5.9. Evidence ingestion ban đầu được tạo với Python 3.11.9.
 
 ## Cài đặt
 
@@ -159,8 +161,15 @@ Tham khảo [Citi Bike System Data](https://citibikenyc.com/system-data) và tu�
 ## Giới hạn và bước tiếp theo
 
 - Checkpoint 2 xác minh một lần ingest live; test tự động kiểm tra hành vi chạy lại. Khi chạy ba lần, mặc định mỗi lần tạo partition riêng; không ghi đè raw trước đó.
-- Chưa triển khai Spark transformation hoặc kết quả phân tích net-flow; đây là phần tiếp theo của dự án.
-- Nhóm cần xác nhận snapshot JC tháng 01/2024 chỉ là evidence hay là phạm vi phân tích cuối. Nếu cần xu hướng rộng hơn, chốt thêm tháng/khu vực trước khi ingest.
-- GBFS snapshot live không phải artifact cốt lõi của Checkpoint 2.
+- Phạm vi phân tích đã chốt: archive Jersey City tháng 01/2024 (`JC-202401`). Chạy Spark aggregation bằng lệnh:
+
+```powershell
+.\.venv\Scripts\python.exe src\analyze_trips.py
+```
+
+  Kết quả cục bộ được ghi vào `data/processed/citibike_trips/2024-01/`: `hourly_station_flow.csv` (trạm × giờ), `monthly_station_flow.csv` (tổng hợp theo trạm), `hourly_demand_by_day_type.csv` (24 giờ × ngày thường/cuối tuần, trung bình chuyến đi theo ngày) và `station_net_flow_extremes.csv` (10 trạm net-flow cao nhất và thấp nhất). Log nằm tại `logs/analyze_trips.txt`. Các output phân tích và log không được commit; có thể tái tạo từ raw archive.
+- Kết quả lần chạy: 50.661 chuyến nguồn; 50.660 có mã trạm đi và 50.494 có mã trạm đến. Bảng tháng có 127 station ID; tổng net-flow là -167 do 167 chuyến không có mã trạm đến. Trung bình ngày thường, giờ 17 cao nhất với 189,48 lượt đi/ngày; giờ 18 kế tiếp với 186,17. Cuối tuần, giờ 15 cao nhất với 110,88 lượt đi/ngày. Trạm có net-flow dương lớn nhất là Grove St PATH (JC115, +698); âm lớn nhất là Brunswick St (JC023, -101). Đây là net-flow của chuyến ghi nhận, không phải tồn kho xe thực tế.
+- Archive JC có một số chuyến kết thúc tại các trạm ngoài Jersey City/Hoboken; output giữ nguyên mọi station ID có trong archive thay vì tự loại theo địa lý. Nếu báo cáo chỉ cần phân tích trạm trong NJ, cần lọc trạm theo quy tắc địa lý được xác định rõ.
+- GBFS snapshot live không được dùng trong phân tích tháng này; nó không thể thay thế lịch sử và không phải artifact cốt lõi của Checkpoint 2.
 
 Xem [evidence checklist](docs/evidence_checklist.md), [kiến trúc](docs/architecture.md), [data dictionary](docs/data_dictionary.md) và [câu hỏi phân tích](docs/analysis_questions.md) để biết thêm chi tiết.

@@ -43,6 +43,7 @@ data/raw/**
 !data/raw/.gitkeep
 data/snapshots/**
 !data/snapshots/.gitkeep
+data/processed/**
 
 # Execution Logs
 logs/**

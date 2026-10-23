@@ -1,28 +1,28 @@
-# Buổi 7 Analytics Roadmap: Research Questions, Metrics & Caveats
+# StationPulse Analytics: January 2024 Scope, Metrics & Caveats
 
-This document serves as the preparatory blueprint for **Buổi 7 (Spark Transformations & Analytical Aggregations)**.
+This document defines the analysis scope as the Jersey City `JC-202401` trip archive. No additional month is included.
 
 ---
 
 ## 1. Core Research Questions
 
 1. **Peak Demand Dynamics**:
-   - What are the peak trip departure hours during weekdays versus weekends?
-   - How do commuting patterns (7:00 AM – 9:30 AM and 5:00 PM – 7:30 PM) compare across residential and commercial transit hubs?
-2. **Station Imbalance & Starvation/Overflow**:
-   - Which docking stations suffer from consistent depletion (outflow > inflow)?
-   - Which stations experience dock overcrowding (inflow > outflow), forcing riders to seek alternative stations?
-3. **User Segment Behaviors (Member vs. Casual)**:
+   - Which hours have the most recorded departures in January 2024?
+   - How do recorded departures differ by weekday versus weekend?
+2. **Station Imbalance Proxy**:
+   - Which stations have the largest net recorded outflow or inflow in this month?
+   - At what hours do individual stations show the largest net-flow changes?
+3. **User Segment Behaviors (optional extension)**:
    - What is the distribution of trip durations and distances between annual members and casual riders?
    - Do casual riders demonstrate higher preference for electric bikes compared to annual members?
-4. **Spatial Flow & Corridor Patterns**:
+4. **Spatial Flow & Corridor Patterns (optional extension)**:
    - Which origin-destination station pairs represent the highest volume transit corridors?
 
 ---
 
 ## 2. Core Imbalance Metric: Station Net-Flow
 
-In Buổi 7, station flow dynamics will be computed using PySpark DataFrame and Spark SQL aggregations:
+Station flow is computed using PySpark DataFrame aggregations from trips whose event timestamp falls in January 2024:
 
 $$\text{Net-Flow}(s, \Delta t) = \text{Arrivals}(s, \Delta t) - \text{Departures}(s, \Delta t)$$
 
@@ -34,9 +34,18 @@ Where:
   - $\text{Net-Flow} < 0$: Net bike depletion (Risk of empty docks / starvation).
   - $\text{Net-Flow} \approx 0$: Balanced station equilibrium.
 
+The reproducible command is `python src/analyze_trips.py`. Outputs are written to `data/processed/citibike_trips/2024-01/`. The archive contains some station endpoints outside Jersey City/Hoboken; the current analysis retains all station IDs present in the selected archive. Timestamps are grouped by the source's local wall-clock hour (the source fields do not include a timezone offset).
+
+## 3. January 2024 Observations
+
+- Weekday departures peak at 17:00 (189.48 departures per weekday on average), followed by 18:00 (186.17). The morning peak is 08:00 (162.13).
+- Weekend departures peak at 15:00 (110.88 departures per weekend day on average), followed by 14:00 (107.50).
+- Across the month, Grove St PATH (`JC115`) has the largest positive net-flow (+698); Brunswick St (`JC023`) has the most negative net-flow (-101).
+- These are descriptive counts from one month. They do not establish recurring seasonal patterns or actual station inventory.
+
 ---
 
-## 3. Important Analytical Caveats & Operational Realities
+## 4. Important Analytical Caveats & Operational Realities
 
 When presenting station net-flow findings, team members must explicitly highlight the following limitations:
 
