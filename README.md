@@ -14,7 +14,9 @@ Checkpoint 2 đã có evidence chạy thật trên Windows với Python 3.11.9, 
 | Ingestion | Tải archive thật thành công; 1.883.296 byte |
 | Raw integrity | ZIP hợp lệ; SHA-256 `d59d149f200fb81e204099afb0f76f1b02267bb2d605e92309e6f9974b176e15` |
 | Spark verification | Lần chạy lại 2026-10-23 đọc schema, đếm 50.661 dòng và hiển thị 5 dòng mẫu |
-| Automated tests | Lần chạy lại 2026-10-23: 23/23 test đạt |
+| Automated tests | 28/28 test đạt (23 test hệ thống/ingestion + 5 test pipeline mới) |
+| Checkpoint 3 Pipeline | Hoàn thành end-to-end (`src/pipeline.py`), làm sạch 49.838 chuyến, join 127 trạm |
+| Baseline Runtime | Tổng 992.06s (~16.5 phút); chi tiết tại [Báo cáo Checkpoint 3](reports/checkpoint3.md) |
 
 Các log và dữ liệu raw trên máy chạy được `.gitignore` loại khỏi Git. Hướng dẫn chạy lại để tái tạo evidence nằm ở phần [Chạy dự án](#chạy-dự-án). Checkpoint 2 tập trung vào ingestion và raw verification; ngoài phạm vi checkpoint, script phân tích net-flow tháng 01/2024 hiện đã được triển khai và có output tái tạo được.
 
@@ -140,6 +142,25 @@ Verifier chọn partition khớp mới nhất, kiểm tra ZIP, đọc các CSV t
 ```
 
 GBFS cung cấp snapshot hiện thời; không dùng một snapshot để suy ra lịch sử số xe tại trạm. Đây là phần mở rộng, không cần để chạy lại checkpoint trip ingestion.
+
+### 6. Chạy Spark Processing Pipeline (Checkpoint 3)
+
+```powershell
+.\.venv\Scripts\python.exe src/pipeline.py
+```
+
+Pipeline thực hiện end-to-end các công đoạn:
+1. **Trích xuất & Đọc dữ liệu:** Tự động định vị file ZIP raw mới nhất, giải nén và đọc với `TRIPS_SCHEMA`, đồng thời nạp Station Dimension với `STATIONS_SCHEMA`.
+2. **Làm sạch (Cleaning):** Loại bỏ trùng lặp `ride_id`, loại bỏ các bản ghi thiếu trường bắt buộc hoặc thời gian kết thúc trước thời gian bắt đầu, loại bỏ chuyến đi ảo (< 1 phút tại cùng trạm). Giảm từ 50.661 dòng xuống 49.838 dòng sạch.
+3. **Biến đổi (Transformation):** Tạo các cột phái sinh `trip_duration_min`, `day_type` (weekday/weekend), `hour_of_day`, `end_hour_of_day`.
+4. **Kết hợp (Join):** Broadcast Join với 127 trạm chiều để bổ sung tên trạm, tọa độ và sức chứa.
+5. **Tổng hợp (Aggregation):**
+   - `hourly_station_flow`: Tính số lượt xuất phát, lượt đến và net-flow cho từng trạm theo từng khung giờ và loại ngày (3.713 dòng).
+   - `monthly_station_flow`: Tổng hợp hoạt động cả tháng theo từng trạm (127 dòng).
+   - `usage_by_member_casual`: Phân tích số chuyến và thời lượng trung bình giữa hội viên (42.014 chuyến, 7,89 phút) và khách vãng lai (7.824 chuyến, 13,32 phút).
+6. **Xuất kết quả:** Lưu vào thư mục `output/preview_csv/` và Parquet (nếu môi trường có hỗ trợ native Hadoop).
+
+Xem chi tiết phân tích kế hoạch thực thi (`explain()`), thời gian chạy từng công đoạn và các điểm nghẽn tại [Báo cáo Checkpoint 3](reports/checkpoint3.md).
 
 ## Evidence của lần chạy đã ghi nhận
 
