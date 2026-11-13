@@ -1,9 +1,12 @@
 
+import csv
 import glob
 import os
 import shutil
+import sys
 import tempfile
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 from pyspark.sql import SparkSession
@@ -18,6 +21,11 @@ from pyspark.sql.functions import (
     avg,
     coalesce
 )
+
+# Cho phép chạy trực tiếp: python src\pipeline.py
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from src.common.schemas import TRIPS_SCHEMA, STATIONS_SCHEMA
 
@@ -553,30 +561,66 @@ def aggregate_trips(trips, stations):
 # 9. OUTPUT - GHI PARQUET VÀ CSV PREVIEW
 # =========================================================
 
-def write_one_output(df, name):
+def write_local_csv(df, destination, limit=None):
+    """Ghi kết quả Spark ra 1 file CSV local bằng Python.
+
+    Cách này không cần HADOOP_HOME/winutils trên Windows. Nếu Spark có
+    winutils thì vẫn ghi được Parquet, vì vậy hàm nhận cả DataFrame."""
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    if limit is not None:
+        df = df.limit(limit)
+
+    with destination.open("w", newline="", encoding="utf-8") as handle:
+
+        writer = csv.writer(handle)
+        writer.writerow(df.columns)
+
+        for row in df.toLocalIterator():
+            writer.writerow(
+                value.isoformat(sep=" ") if isinstance(value, datetime) else value
+                for value in row
+            )
+
+
+def write_parquet(df, parquet_path):
+    """Ghi Parquet; trả về False nếu máy thiếu winutils/HADOOP_HOME."""
+
+    try:
+        (
+            df.write
+            .mode("overwrite")
+            .parquet(str(parquet_path))
+        )
+        return True
+
+    except Exception as error:
+        if "winutils" not in str(error).lower() and "hadoop.home.dir" not in str(error).lower():
+            raise
+
+        print(
+            "[OUTPUT] Bỏ qua Parquet: máy chưa có winutils/HADOOP_HOME "
+            f"({type(error).__name__}). Chỉ ghi CSV."
+        )
+        return False
+
+
+def write_one_output(df, name, full_csv=True):
 
     parquet_path = OUTPUT_DIR / name
-    csv_path = PREVIEW_DIR / name
+    csv_path = PREVIEW_DIR / f"{name}.csv"
 
-    # Ghi toàn bộ dữ liệu dạng Parquet
-    (
-        df.write
-        .mode("overwrite")
-        .parquet(str(parquet_path))
-    )
+    # Ghi toàn bộ dữ liệu dạng Parquet (nếu môi trường cho phép)
+    parquet_ok = write_parquet(df, parquet_path)
 
-    # Ghi tối đa 50 dòng để xem trước
-    (
-        df.limit(50)
-        .coalesce(1)
-        .write
-        .mode("overwrite")
-        .option("header", True)
-        .csv(str(csv_path))
-    )
+    # Ghi CSV bằng Python, tránh lỗi HADOOP_HOME/winutils khi Spark ghi file.
+    # full_csv=True: xuất toàn bộ dữ liệu; False: 50 dòng xem trước.
+    write_local_csv(df, csv_path, limit=None if full_csv else 50)
 
-    print(f"[OUTPUT] Parquet: {parquet_path}")
-    print(f"[OUTPUT] CSV preview: {csv_path}")
+    if parquet_ok:
+        print(f"[OUTPUT] Parquet: {parquet_path}")
+    print(f"[OUTPUT] CSV: {csv_path}")
 
 
 def write_output(hourly_flow, monthly_flow, usage):
@@ -595,7 +639,8 @@ def write_output(hourly_flow, monthly_flow, usage):
 
     write_one_output(
         usage,
-        "usage_by_member_casual"
+        "usage_by_member_casual",
+        full_csv=False
     )
 
     print("[OUTPUT] All outputs written successfully.")
