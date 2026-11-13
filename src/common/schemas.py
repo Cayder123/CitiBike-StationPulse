@@ -1,41 +1,53 @@
+﻿from pyspark.sql.types import StructType, StructField, StringType, TimestampType, DoubleType, IntegerType
+from pyspark.sql.functions import col, first, lit
 
-"""
-Data Schemas for Citi Bike StationPulse Pipeline
-Author: DEV 1
-"""
-from pyspark.sql.types import (
-    StructType,
-    StructField,
-    StringType,
-    DoubleType,
-    TimestampType,
-    IntegerType
-)
-
-# 1. SCHEMA CHO BẢNG FACT TRIPS (Dữ liệu chuyến đi gốc)
-# Khóa chính là ride_id (không được phép null)
-TRIP_SCHEMA = StructType([
-    StructField("ride_id", StringType(), False),           # Mã chuyến đi (Unique Key)
-    StructField("rideable_type", StringType(), True),      # Loại xe (classic_bike, electric_bike)
-    StructField("started_at", TimestampType(), True),      # Thời gian bắt đầu
-    StructField("ended_at", TimestampType(), True),        # Thời gian kết thúc
-    StructField("start_station_name", StringType(), True), # Tên trạm xuất phát
-    StructField("start_station_id", StringType(), True),   # Mã trạm xuất phát (Foreign Key)
-    StructField("end_station_name", StringType(), True),   # Tên trạm kết thúc
-    StructField("end_station_id", StringType(), True),     # Mã trạm kết thúc (Foreign Key)
-    StructField("start_lat", DoubleType(), True),          # Tọa độ vĩ độ trạm đi
-    StructField("start_lng", DoubleType(), True),          # Tọa độ kinh độ trạm đi
-    StructField("end_lat", DoubleType(), True),            # Tọa độ vĩ độ trạm đến
-    StructField("end_lng", DoubleType(), True),            # Tọa độ kinh độ trạm đến
-    StructField("member_casual", StringType(), True)       # Loại khách (member hay casual)
+TRIPS_SCHEMA = StructType([
+    StructField("ride_id", StringType(), nullable=False),
+    StructField("rideable_type", StringType(), nullable=True),
+    StructField("started_at", TimestampType(), nullable=True),
+    StructField("ended_at", TimestampType(), nullable=True),
+    StructField("start_station_name", StringType(), nullable=True),
+    StructField("start_station_id", StringType(), nullable=True),
+    StructField("end_station_name", StringType(), nullable=True),
+    StructField("end_station_id", StringType(), nullable=True),
+    StructField("start_lat", DoubleType(), nullable=True),
+    StructField("start_lng", DoubleType(), nullable=True),
+    StructField("end_lat", DoubleType(), nullable=True),
+    StructField("end_lng", DoubleType(), nullable=True),
+    StructField("member_casual", StringType(), nullable=True)
 ])
 
-# 2. SCHEMA CHO BẢNG DIMENSION STATIONS (Bảng tra cứu thông tin trạm)
-# Phục vụ cho bước Fact-Dimension Join bắt buộc của Checkpoint 3 (Slide 15)
-STATION_DIM_SCHEMA = StructType([
-    StructField("station_id", StringType(), False),        # Mã trạm (Primary Key - Unique 100%)
-    StructField("station_name", StringType(), True),       # Tên trạm chuẩn hóa
-    StructField("latitude", DoubleType(), True),           # Tọa độ vĩ độ
-    StructField("longitude", DoubleType(), True),          # Tọa độ kinh độ
-    StructField("region", StringType(), True)              # Khu vực (vd: Jersey City, Hoboken...)
+STATIONS_SCHEMA = StructType([
+    StructField("station_id", StringType(), nullable=False),
+    StructField("station_name", StringType(), nullable=True),
+    StructField("lat", DoubleType(), nullable=True),
+    StructField("lng", DoubleType(), nullable=True),
+    StructField("capacity", IntegerType(), nullable=True)
 ])
+
+def build_station_dimension(trips_df):
+    start_stations = trips_df.select(
+        col("start_station_id").alias("station_id"),
+        col("start_station_name").alias("station_name"),
+        col("start_lat").alias("lat"),
+        col("start_lng").alias("lng")
+    ).filter(col("station_id").isNotNull())
+
+    end_stations = trips_df.select(
+        col("end_station_id").alias("station_id"),
+        col("end_station_name").alias("station_name"),
+        col("end_lat").alias("lat"),
+        col("end_lng").alias("lng")
+    ).filter(col("station_id").isNotNull())
+
+    dim_stations = (
+        start_stations.union(end_stations)
+        .groupBy("station_id")
+        .agg(
+            first("station_name", ignorenulls=True).alias("station_name"),
+            first("lat", ignorenulls=True).alias("lat"),
+            first("lng", ignorenulls=True).alias("lng")
+        )
+        .withColumn("capacity", lit(20).cast(IntegerType()))
+    )
+    return dim_stations
