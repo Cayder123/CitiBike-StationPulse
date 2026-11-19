@@ -1,6 +1,7 @@
 import argparse
 import csv
 import os
+import shutil
 import statistics
 import subprocess
 import sys
@@ -31,18 +32,23 @@ EXPERIMENTS = {
     }
 }
 
+FIELDNAMES = [
+    "timestamp", "experiment_id", "description", "runs", "run_times_sec",
+    "median_sec", "mean_sec", "variance_sec", "stdev_sec", "cv_pct"
+]
+
 def run_single_execution(script_path, extra_args):
     """Chạy 1 lần pipeline và trả về thời gian thực thi (giây)."""
     cmd = [sys.executable, script_path] + extra_args
     start_time = time.perf_counter()
     result = subprocess.run(cmd, capture_output=True, text=True)
     elapsed = time.perf_counter() - start_time
-    
+
     if result.returncode != 0:
         print(f"\n[ERROR] Lỗi khi chạy {' '.join(cmd)}:")
         print(result.stderr)
         sys.exit(1)
-        
+
     return round(elapsed, 2)
 
 def benchmark_experiment(exp_id, config, runs, warmup=False):
@@ -65,13 +71,13 @@ def benchmark_experiment(exp_id, config, runs, warmup=False):
 
     median_time = round(statistics.median(run_times), 2)
     mean_time = round(statistics.mean(run_times), 2)
-    variance_time = round(statistics.variance(run_times), 4) if len(run_times) > 1 else 0.0
-    stdev_time = round(statistics.stdev(run_times), 2) if len(run_times) > 1 else 0.0
+    variance_time = round(statistics.variance(run_times), 4)
+    stdev_time = round(statistics.stdev(run_times), 2)
     cv_percent = round((stdev_time / mean_time) * 100, 2) if mean_time > 0 else 0.0
 
     print(f"  => KẾT QUẢ {exp_id}: Median = {median_time}s | Mean = {mean_time}s | "
           f"Variance = {variance_time}s² | StdDev = {stdev_time}s (CV: {cv_percent}%)")
-    
+
     return {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "experiment_id": exp_id,
@@ -85,14 +91,40 @@ def benchmark_experiment(exp_id, config, runs, warmup=False):
         "cv_pct": cv_percent
     }
 
+def prepare_output_csv(output_path):
+    """Kiểm tra schema file CSV hiện tại; nếu lệch header cũ thì backup và tạo file mới."""
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    if not os.path.isfile(output_path):
+        return False  # File chưa tồn tại -> ghi mới kèm header
+
+    with open(output_path, mode="r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        existing_header = next(reader, None)
+
+    if existing_header != FIELDNAMES:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base, ext = os.path.splitext(output_path)
+        backup_path = f"{base}_legacy_{ts}{ext}"
+        shutil.move(output_path, backup_path)
+        print(f"[INFO] Phát hiện schema benchmark.csv cũ không khớp ({existing_header}).")
+        print(f"[INFO] Đã sao lưu file cũ sang: {backup_path} và tạo file mới với schema chuẩn.")
+        return False
+
+    return True  # File tồn tại và khớp schema -> append
+
 def main():
     parser = argparse.ArgumentParser(description="Benchmark Harness cho CitiBike StationPulse")
     parser.add_argument("--mode", choices=["baseline", "optimized", "all"], default="baseline",
                         help="Chọn chế độ benchmark (baseline | optimized | all)")
-    parser.add_argument("--runs", type=int, default=3, help="Số lần chạy lặp lại (tối thiểu 3 theo Slide 8)")
+    parser.add_argument("--runs", type=int, default=3,
+                        help="Số lần chạy lặp lại (BẮT BUỘC >= 3 theo quy tắc thực nghiệm)")
     parser.add_argument("--warmup", action="store_true", help="Chạy 1 lần warm-up trước khi đo thật")
     parser.add_argument("--output", default="reports/benchmark.csv", help="Đường dẫn lưu file CSV kết quả")
     args = parser.parse_args()
+
+    # Ràng buộc cứng --runs >= 3
+    if args.runs < 3:
+        parser.error(f"--runs phải >= 3 để tính thống kê (Median, Variance) có ý nghĩa (nhận được: {args.runs}).")
 
     if args.mode == "baseline":
         selected_exps = ["E00_baseline"]
@@ -108,14 +140,10 @@ def main():
             results.append(res)
 
     if results:
-        os.makedirs(os.path.dirname(args.output), exist_ok=True)
-        fieldnames = ["timestamp", "experiment_id", "description", "runs", "run_times_sec", 
-                      "median_sec", "mean_sec", "variance_sec", "stdev_sec", "cv_pct"]
-        
-        file_exists = os.path.isfile(args.output)
-        with open(args.output, mode="a" if file_exists else "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if not file_exists:
+        can_append = prepare_output_csv(args.output)
+        with open(args.output, mode="a" if can_append else "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            if not can_append:
                 writer.writeheader()
             writer.writerows(results)
         print(f"\n[OK] Đã lưu kết quả benchmark vào {args.output}")
