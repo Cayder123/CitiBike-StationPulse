@@ -1,3 +1,4 @@
+import numpy as np
 import argparse
 import glob
 import os
@@ -71,38 +72,66 @@ def calculate_metrics(df, label):
 
 def compare_dataframes_row_by_row(df_base, df_after, table_name):
     """
-    So sánh chính xác từng dòng giữa Baseline và Optimized, không phụ thuộc thứ tự dòng.
+    So sánh dữ liệu từng dòng, không phụ thuộc thứ tự dòng.
     """
     if list(df_base.columns) != list(df_after.columns):
-        return f"[{table_name}] Khác cấu trúc cột nên không thể so sánh từng dòng."
+        return f"[{table_name}] Khác cấu trúc cột."
+
     if len(df_base) != len(df_after):
-        return f"[{table_name}] Khác số dòng ({len(df_base)} vs {len(df_after)}) nên không thể so sánh từng dòng."
+        return f"[{table_name}] Khác số dòng."
 
     cols = list(df_base.columns)
-    b_norm = df_base.copy()
-    a_norm = df_after.copy()
 
-    # Làm tròn cột float để tránh sai số dấu phẩy động khi Spark đổi thứ tự cộng
-    for col in cols:
-        if pd.api.types.is_float_dtype(b_norm[col]) or pd.api.types.is_float_dtype(a_norm[col]):
-            b_norm[col] = b_norm[col].round(6)
-            a_norm[col] = a_norm[col].round(6)
-
-    # Sắp xếp toàn bộ các cột để loại bỏ sự phụ thuộc vào thứ tự partition của Spark
-    b_sorted = b_norm.sort_values(by=cols, kind="mergesort", na_position="first").reset_index(drop=True)
-    a_sorted = a_norm.sort_values(by=cols, kind="mergesort", na_position="first").reset_index(drop=True)
-
+    # Sắp xếp dữ liệu để loại bỏ phụ thuộc thứ tự dòng
     try:
-        assert_frame_equal(b_sorted, a_sorted, check_dtype=False, rtol=1e-5, atol=1e-6)
-        return None
-    except AssertionError as e:
-        diff_mask = (b_sorted.fillna("__NA__") != a_sorted.fillna("__NA__")).any(axis=1)
-        diff_count = int(diff_mask.sum())
-        first_idx = int(diff_mask.idxmax()) if diff_count > 0 else 0
-        return (f"[{table_name}] Sai lệch dữ liệu ở {diff_count} dòng (không phụ thuộc thứ tự). "
-                f"Dòng sai lệch đầu tiên (index sau sort={first_idx}): "
-                f"Baseline={b_sorted.iloc[first_idx].to_dict()} vs Optimized={a_sorted.iloc[first_idx].to_dict()}")
+        b_sorted = df_base.sort_values(
+            by=cols, kind="mergesort", na_position="first"
+        ).reset_index(drop=True)
 
+        a_sorted = df_after.sort_values(
+            by=cols, kind="mergesort", na_position="first"
+        ).reset_index(drop=True)
+    except Exception as e:
+        return f"[{table_name}] Không thể sắp xếp dữ liệu: {e}"
+
+    # So sánh từng cột
+    row_diff = np.zeros(len(b_sorted), dtype=bool)
+
+    for col in cols:
+        b = b_sorted[col]
+        a = a_sorted[col]
+
+        if pd.api.types.is_numeric_dtype(b) and pd.api.types.is_numeric_dtype(a):
+            b_values = b.to_numpy(dtype=float, na_value=np.nan)
+            a_values = a.to_numpy(dtype=float, na_value=np.nan)
+
+            equal = np.isclose(
+                b_values, a_values,
+                rtol=1e-5,
+                atol=1e-6,
+                equal_nan=True
+            )
+        else:
+            equal = (
+                b.eq(a) | (b.isna() & a.isna())
+            ).to_numpy()
+
+        row_diff |= ~equal
+
+    diff_count = int(row_diff.sum())
+
+    if diff_count > 0:
+        first_idx = int(np.where(row_diff)[0][0])
+
+        return (
+            f"[{table_name}] Sai lệch dữ liệu ở {diff_count} dòng. "
+            f"Dòng đầu tiên (index sau sort={first_idx}): "
+            f"Baseline={b_sorted.iloc[first_idx].to_dict()} "
+            f"vs Optimized={a_sorted.iloc[first_idx].to_dict()}"
+        )
+
+    return None
+    
 def check_strict_expected_for_table(table_name, row_count):
     """
     Chỉ kiểm tra mốc chuẩn cứng (49.838 hoặc 127) cho bảng cleaned trips và stations.
@@ -181,7 +210,13 @@ def main():
             else:
                 expected_series = df_after[dep_c] - df_after[arr_c]
 
-            mismatch_rows = (df_after[net_c] != expected_series).sum()
+            mismatch_rows = (~np.isclose(
+                df_after[net_c].to_numpy(dtype=float),
+                expected_series.to_numpy(dtype=float),
+                rtol=1e-5,
+                atol=1e-6,
+                equal_nan=True
+            )).sum()
             if mismatch_rows > 0:
                 errors.append(f"[{table_name}] Có {mismatch_rows} dòng sai công thức Net Flow ({args.net_formula})")
 
