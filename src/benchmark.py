@@ -10,9 +10,9 @@ from datetime import datetime
 # Định nghĩa các kịch bản thử nghiệm theo luật One-Change-At-A-Time
 EXPERIMENTS = {
     "E00_baseline": {
-        "script": "src/pipeline.py", # Cập nhật lại tên file pipeline gốc của nhóm nếu khác
+        "script": "src/pipeline.py",  # Cập nhật lại tên file pipeline gốc của nhóm nếu khác
         "args": [],
-        "desc": "Baseline (200 partitions, SortMergeJoin, no cache)"
+        "desc": "Baseline (200 partitions, BroadcastHashJoin default, no cache)"
     },
     "E01_partitions4": {
         "script": "src/pipeline_optimized.py",
@@ -22,7 +22,7 @@ EXPERIMENTS = {
     "E02_broadcast": {
         "script": "src/pipeline_optimized.py",
         "args": ["--partitions", "4", "--broadcast"],
-        "desc": "Lever 2: + broadcast(stations)"
+        "desc": "Lever 2: + explicit broadcast(stations)"
     },
     "E03_optimized": {
         "script": "src/pipeline_optimized.py",
@@ -65,10 +65,12 @@ def benchmark_experiment(exp_id, config, runs, warmup=False):
 
     median_time = round(statistics.median(run_times), 2)
     mean_time = round(statistics.mean(run_times), 2)
+    variance_time = round(statistics.variance(run_times), 4) if len(run_times) > 1 else 0.0
     stdev_time = round(statistics.stdev(run_times), 2) if len(run_times) > 1 else 0.0
     cv_percent = round((stdev_time / mean_time) * 100, 2) if mean_time > 0 else 0.0
 
-    print(f"  => KẾT QUẢ {exp_id}: Median = {median_time}s | Mean = {mean_time}s | StdDev = {stdev_time}s (CV: {cv_percent}%)")
+    print(f"  => KẾT QUẢ {exp_id}: Median = {median_time}s | Mean = {mean_time}s | "
+          f"Variance = {variance_time}s² | StdDev = {stdev_time}s (CV: {cv_percent}%)")
     
     return {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -78,8 +80,9 @@ def benchmark_experiment(exp_id, config, runs, warmup=False):
         "run_times_sec": str(run_times),
         "median_sec": median_time,
         "mean_sec": mean_time,
+        "variance_sec": variance_time,
         "stdev_sec": stdev_time,
-        "variance_pct": cv_percent
+        "cv_pct": cv_percent
     }
 
 def main():
@@ -107,7 +110,7 @@ def main():
     if results:
         os.makedirs(os.path.dirname(args.output), exist_ok=True)
         fieldnames = ["timestamp", "experiment_id", "description", "runs", "run_times_sec", 
-                      "median_sec", "mean_sec", "stdev_sec", "variance_pct"]
+                      "median_sec", "mean_sec", "variance_sec", "stdev_sec", "cv_pct"]
         
         file_exists = os.path.isfile(args.output)
         with open(args.output, mode="a" if file_exists else "w", newline="", encoding="utf-8") as f:
