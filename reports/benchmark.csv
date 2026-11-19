@@ -1,0 +1,5 @@
+timestamp,experiment_id,description,runs,run_times_sec,median_sec,mean_sec,variance_sec,stdev_sec,cv_pct
+2026-11-19 22:11:19,E00_baseline,"Baseline (200 partitions, BroadcastHashJoin default, no cache)",3,"[30.11, 28.64, 28.68]",28.68,29.14,0.7012,0.84,2.88
+2026-11-19 22:12:49,E01_partitions4,Lever 1: shuffle.partitions=4,3,"[22.05, 22.63, 23.04]",22.63,22.57,0.2474,0.5,2.22
+2026-11-19 22:14:17,E02_broadcast,Lever 2: + explicit broadcast(stations),3,"[21.66, 21.97, 22.01]",21.97,21.88,0.0367,0.19,0.87
+2026-11-19 22:15:38,E03_optimized,Lever 3: + cleaned_trips.cache() (Full Optimized),3,"[20.45, 20.03, 20.04]",20.04,20.17,0.0574,0.24,1.19

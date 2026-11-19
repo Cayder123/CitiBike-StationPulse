@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from contextlib import redirect_stdout
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
@@ -665,7 +666,7 @@ def main():
         stations = read_stations(spark)
 
         # CLEAN
-        cleaned_trips = clean_trips(trips).cache()
+        cleaned_trips = clean_trips(trips)
 
         # TRANSFORM
         transformed_trips = transform_trips(cleaned_trips)
@@ -675,6 +676,15 @@ def main():
             transformed_trips,
             stations
         )
+
+        #SAVE EXPLAIN PLAN
+        os.makedirs("reports", exist_ok=True)
+
+        with open("reports/explain-before.txt", "w", encoding="utf-8") as f:
+            with redirect_stdout(f):
+                joined_trips.explain(mode="formatted")
+
+        print("[EXPLAIN] Saved explain-before.txt")
 
         # AGGREGATE
         hourly_flow, monthly_flow, usage = aggregate_trips(

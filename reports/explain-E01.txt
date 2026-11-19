@@ -1,0 +1,133 @@
+== Physical Plan ==
+AdaptiveSparkPlan (22)
++- Project (21)
+   +- BroadcastHashJoin LeftOuter BuildRight (20)
+      :- Project (15)
+      :  +- BroadcastHashJoin LeftOuter BuildRight (14)
+      :     :- Project (9)
+      :     :  +- Filter (8)
+      :     :     +- SortAggregate (7)
+      :     :        +- Sort (6)
+      :     :           +- Exchange (5)
+      :     :              +- SortAggregate (4)
+      :     :                 +- Sort (3)
+      :     :                    +- Filter (2)
+      :     :                       +- Scan csv  (1)
+      :     +- BroadcastExchange (13)
+      :        +- Project (12)
+      :           +- Filter (11)
+      :              +- Scan csv  (10)
+      +- BroadcastExchange (19)
+         +- Project (18)
+            +- Filter (17)
+               +- Scan csv  (16)
+
+
+(1) Scan csv 
+Output [13]: [ride_id#0, rideable_type#1, started_at#2, ended_at#3, start_station_name#4, start_station_id#5, end_station_name#6, end_station_id#7, start_lat#8, start_lng#9, end_lat#10, end_lng#11, member_casual#12]
+Batched: false
+Location: InMemoryFileIndex [file:/C:/Users/admin/AppData/Local/Temp/tmptcgnxck4/JC-202401-citibike-tripdata.csv]
+PushedFilters: [IsNotNull(ride_id)]
+ReadSchema: struct<ride_id:string,rideable_type:string,started_at:timestamp,ended_at:timestamp,start_station_name:string,start_station_id:string,end_station_name:string,end_station_id:string,start_lat:double,start_lng:double,end_lat:double,end_lng:double,member_casual:string>
+
+(2) Filter
+Input [13]: [ride_id#0, rideable_type#1, started_at#2, ended_at#3, start_station_name#4, start_station_id#5, end_station_name#6, end_station_id#7, start_lat#8, start_lng#9, end_lat#10, end_lng#11, member_casual#12]
+Condition : isnotnull(ride_id#0)
+
+(3) Sort
+Input [13]: [ride_id#0, rideable_type#1, started_at#2, ended_at#3, start_station_name#4, start_station_id#5, end_station_name#6, end_station_id#7, start_lat#8, start_lng#9, end_lat#10, end_lng#11, member_casual#12]
+Arguments: [ride_id#0 ASC NULLS FIRST], false, 0
+
+(4) SortAggregate
+Input [13]: [ride_id#0, rideable_type#1, started_at#2, ended_at#3, start_station_name#4, start_station_id#5, end_station_name#6, end_station_id#7, start_lat#8, start_lng#9, end_lat#10, end_lng#11, member_casual#12]
+Keys [1]: [ride_id#0]
+Functions [12]: [partial_first(rideable_type#1, false), partial_first(started_at#2, false), partial_first(ended_at#3, false), partial_first(start_station_name#4, false), partial_first(start_station_id#5, false), partial_first(end_station_name#6, false), partial_first(end_station_id#7, false), partial_first(start_lat#8, false), partial_first(start_lng#9, false), partial_first(end_lat#10, false), partial_first(end_lng#11, false), partial_first(member_casual#12, false)]
+Aggregate Attributes [24]: [first#1061, valueSet#1062, first#1063, valueSet#1064, first#1065, valueSet#1066, first#1067, valueSet#1068, first#1069, valueSet#1070, first#1071, valueSet#1072, first#1073, valueSet#1074, first#1075, valueSet#1076, first#1077, valueSet#1078, first#1079, valueSet#1080, first#1081, valueSet#1082, first#1083, valueSet#1084]
+Results [25]: [ride_id#0, first#1085, valueSet#1086, first#1087, valueSet#1088, first#1089, valueSet#1090, first#1091, valueSet#1092, first#1093, valueSet#1094, first#1095, valueSet#1096, first#1097, valueSet#1098, first#1099, valueSet#1100, first#1101, valueSet#1102, first#1103, valueSet#1104, first#1105, valueSet#1106, first#1107, valueSet#1108]
+
+(5) Exchange
+Input [25]: [ride_id#0, first#1085, valueSet#1086, first#1087, valueSet#1088, first#1089, valueSet#1090, first#1091, valueSet#1092, first#1093, valueSet#1094, first#1095, valueSet#1096, first#1097, valueSet#1098, first#1099, valueSet#1100, first#1101, valueSet#1102, first#1103, valueSet#1104, first#1105, valueSet#1106, first#1107, valueSet#1108]
+Arguments: hashpartitioning(ride_id#0, 4), ENSURE_REQUIREMENTS, [plan_id=2023]
+
+(6) Sort
+Input [25]: [ride_id#0, first#1085, valueSet#1086, first#1087, valueSet#1088, first#1089, valueSet#1090, first#1091, valueSet#1092, first#1093, valueSet#1094, first#1095, valueSet#1096, first#1097, valueSet#1098, first#1099, valueSet#1100, first#1101, valueSet#1102, first#1103, valueSet#1104, first#1105, valueSet#1106, first#1107, valueSet#1108]
+Arguments: [ride_id#0 ASC NULLS FIRST], false, 0
+
+(7) SortAggregate
+Input [25]: [ride_id#0, first#1085, valueSet#1086, first#1087, valueSet#1088, first#1089, valueSet#1090, first#1091, valueSet#1092, first#1093, valueSet#1094, first#1095, valueSet#1096, first#1097, valueSet#1098, first#1099, valueSet#1100, first#1101, valueSet#1102, first#1103, valueSet#1104, first#1105, valueSet#1106, first#1107, valueSet#1108]
+Keys [1]: [ride_id#0]
+Functions [12]: [first(rideable_type#1, false), first(started_at#2, false), first(ended_at#3, false), first(start_station_name#4, false), first(start_station_id#5, false), first(end_station_name#6, false), first(end_station_id#7, false), first(start_lat#8, false), first(start_lng#9, false), first(end_lat#10, false), first(end_lng#11, false), first(member_casual#12, false)]
+Aggregate Attributes [12]: [first(rideable_type#1)()#1037, first(started_at#2)()#1039, first(ended_at#3)()#1041, first(start_station_name#4)()#1043, first(start_station_id#5)()#1045, first(end_station_name#6)()#1047, first(end_station_id#7)()#1049, first(start_lat#8)()#1051, first(start_lng#9)()#1053, first(end_lat#10)()#1055, first(end_lng#11)()#1057, first(member_casual#12)()#1059]
+Results [13]: [ride_id#0, first(rideable_type#1)()#1037 AS rideable_type#1038, first(started_at#2)()#1039 AS started_at#1040, first(ended_at#3)()#1041 AS ended_at#1042, first(start_station_name#4)()#1043 AS start_station_name#1044, first(start_station_id#5)()#1045 AS start_station_id#1046, first(end_station_name#6)()#1047 AS end_station_name#1048, first(end_station_id#7)()#1049 AS end_station_id#1050, first(start_lat#8)()#1051 AS start_lat#1052, first(start_lng#9)()#1053 AS start_lng#1054, first(end_lat#10)()#1055 AS end_lat#1056, first(end_lng#11)()#1057 AS end_lng#1058, first(member_casual#12)()#1059 AS member_casual#1060]
+
+(8) Filter
+Input [13]: [ride_id#0, rideable_type#1038, started_at#1040, ended_at#1042, start_station_name#1044, start_station_id#1046, end_station_name#1048, end_station_id#1050, start_lat#1052, start_lng#1054, end_lat#1056, end_lng#1058, member_casual#1060]
+Condition : (((isnotnull(started_at#1040) AND isnotnull(ended_at#1042)) AND (ended_at#1042 > started_at#1040)) AND (((isnull(start_station_id#1046) OR isnull(end_station_id#1050)) OR NOT (start_station_id#1046 = end_station_id#1050)) OR ((cast((unix_timestamp(ended_at#1042, yyyy-MM-dd HH:mm:ss, Some(America/New_York), false) - unix_timestamp(started_at#1040, yyyy-MM-dd HH:mm:ss, Some(America/New_York), false)) as double) / 60.0) >= 1.0)))
+
+(9) Project
+Output [18]: [ride_id#0, rideable_type#1038, started_at#1040, ended_at#1042, start_station_name#1044, start_station_id#1046, end_station_name#1048, end_station_id#1050, start_lat#1052, start_lng#1054, end_lat#1056, end_lng#1058, member_casual#1060, (cast((unix_timestamp(ended_at#1042, yyyy-MM-dd HH:mm:ss, Some(America/New_York), false) - unix_timestamp(started_at#1040, yyyy-MM-dd HH:mm:ss, Some(America/New_York), false)) as double) / 60.0) AS trip_duration_min#146, CASE WHEN dayofweek(cast(started_at#1040 as date)) IN (1,7) THEN weekend ELSE weekday END AS day_type#257, hour(started_at#1040, Some(America/New_York)) AS hour_of_day#273, hour(ended_at#1042, Some(America/New_York)) AS end_hour_of_day#290, CASE WHEN dayofweek(cast(ended_at#1042 as date)) IN (1,7) THEN weekend ELSE weekday END AS end_day_type#308]
+Input [13]: [ride_id#0, rideable_type#1038, started_at#1040, ended_at#1042, start_station_name#1044, start_station_id#1046, end_station_name#1048, end_station_id#1050, start_lat#1052, start_lng#1054, end_lat#1056, end_lng#1058, member_casual#1060]
+
+(10) Scan csv 
+Output [5]: [station_id#44, station_name#45, lat#46, lng#47, capacity#48]
+Batched: false
+Location: InMemoryFileIndex [file:/D:/CitiBike-StationPulse/data/dim_stations/station_dimension.csv]
+PushedFilters: [IsNotNull(station_id)]
+ReadSchema: struct<station_id:string,station_name:string,lat:double,lng:double,capacity:int>
+
+(11) Filter
+Input [5]: [station_id#44, station_name#45, lat#46, lng#47, capacity#48]
+Condition : isnotnull(station_id#44)
+
+(12) Project
+Output [5]: [station_id#44 AS start_dim_id#427, station_name#45 AS start_dim_name#428, lat#46 AS start_dim_lat#429, lng#47 AS start_dim_lng#430, capacity#48 AS start_dim_capacity#431]
+Input [5]: [station_id#44, station_name#45, lat#46, lng#47, capacity#48]
+
+(13) BroadcastExchange
+Input [5]: [start_dim_id#427, start_dim_name#428, start_dim_lat#429, start_dim_lng#430, start_dim_capacity#431]
+Arguments: HashedRelationBroadcastMode(List(input[0, string, true]),false), [plan_id=2029]
+
+(14) BroadcastHashJoin
+Left keys [1]: [start_station_id#1046]
+Right keys [1]: [start_dim_id#427]
+Join type: LeftOuter
+Join condition: None
+
+(15) Project
+Output [22]: [ride_id#0, rideable_type#1038, started_at#1040, ended_at#1042, start_station_name#1044, start_station_id#1046, end_station_name#1048, end_station_id#1050, start_lat#1052, start_lng#1054, end_lat#1056, end_lng#1058, member_casual#1060, trip_duration_min#146, day_type#257, hour_of_day#273, end_hour_of_day#290, end_day_type#308, start_dim_name#428, start_dim_lat#429, start_dim_lng#430, start_dim_capacity#431]
+Input [23]: [ride_id#0, rideable_type#1038, started_at#1040, ended_at#1042, start_station_name#1044, start_station_id#1046, end_station_name#1048, end_station_id#1050, start_lat#1052, start_lng#1054, end_lat#1056, end_lng#1058, member_casual#1060, trip_duration_min#146, day_type#257, hour_of_day#273, end_hour_of_day#290, end_day_type#308, start_dim_id#427, start_dim_name#428, start_dim_lat#429, start_dim_lng#430, start_dim_capacity#431]
+
+(16) Scan csv 
+Output [5]: [station_id#620, station_name#621, lat#622, lng#623, capacity#624]
+Batched: false
+Location: InMemoryFileIndex [file:/D:/CitiBike-StationPulse/data/dim_stations/station_dimension.csv]
+PushedFilters: [IsNotNull(station_id)]
+ReadSchema: struct<station_id:string,station_name:string,lat:double,lng:double,capacity:int>
+
+(17) Filter
+Input [5]: [station_id#620, station_name#621, lat#622, lng#623, capacity#624]
+Condition : isnotnull(station_id#620)
+
+(18) Project
+Output [5]: [station_id#620 AS end_dim_id#610, station_name#621 AS end_dim_name#611, lat#622 AS end_dim_lat#612, lng#623 AS end_dim_lng#613, capacity#624 AS end_dim_capacity#614]
+Input [5]: [station_id#620, station_name#621, lat#622, lng#623, capacity#624]
+
+(19) BroadcastExchange
+Input [5]: [end_dim_id#610, end_dim_name#611, end_dim_lat#612, end_dim_lng#613, end_dim_capacity#614]
+Arguments: HashedRelationBroadcastMode(List(input[0, string, true]),false), [plan_id=2033]
+
+(20) BroadcastHashJoin
+Left keys [1]: [end_station_id#1050]
+Right keys [1]: [end_dim_id#610]
+Join type: LeftOuter
+Join condition: None
+
+(21) Project
+Output [26]: [ride_id#0, rideable_type#1038, started_at#1040, ended_at#1042, start_station_name#1044, start_station_id#1046, end_station_name#1048, end_station_id#1050, start_lat#1052, start_lng#1054, end_lat#1056, end_lng#1058, member_casual#1060, trip_duration_min#146, day_type#257, hour_of_day#273, end_hour_of_day#290, end_day_type#308, start_dim_name#428, start_dim_lat#429, start_dim_lng#430, start_dim_capacity#431, end_dim_name#611, end_dim_lat#612, end_dim_lng#613, end_dim_capacity#614]
+Input [27]: [ride_id#0, rideable_type#1038, started_at#1040, ended_at#1042, start_station_name#1044, start_station_id#1046, end_station_name#1048, end_station_id#1050, start_lat#1052, start_lng#1054, end_lat#1056, end_lng#1058, member_casual#1060, trip_duration_min#146, day_type#257, hour_of_day#273, end_hour_of_day#290, end_day_type#308, start_dim_name#428, start_dim_lat#429, start_dim_lng#430, start_dim_capacity#431, end_dim_id#610, end_dim_name#611, end_dim_lat#612, end_dim_lng#613, end_dim_capacity#614]
+
+(22) AdaptiveSparkPlan
+Output [26]: [ride_id#0, rideable_type#1038, started_at#1040, ended_at#1042, start_station_name#1044, start_station_id#1046, end_station_name#1048, end_station_id#1050, start_lat#1052, start_lng#1054, end_lat#1056, end_lng#1058, member_casual#1060, trip_duration_min#146, day_type#257, hour_of_day#273, end_hour_of_day#290, end_day_type#308, start_dim_name#428, start_dim_lat#429, start_dim_lng#430, start_dim_capacity#431, end_dim_name#611, end_dim_lat#612, end_dim_lng#613, end_dim_capacity#614]
+Arguments: isFinalPlan=false
+
+
