@@ -1,0 +1,2 @@
+timestamp,experiment_id,description,runs,run_times_sec,median_sec,mean_sec,stdev_sec,variance_pct
+2026-11-19 09:18:26,E00_baseline,"Baseline (200 partitions, SortMergeJoin, no cache)",3,"[178.04, 151.69, 137.94]",151.69,155.89,20.38,13.07
