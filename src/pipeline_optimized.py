@@ -30,6 +30,28 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+# Cấu hình UTF-8 cho console để tránh lỗi UnicodeEncodeError trên Windows cp1258
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+# Tự động đảm bảo PySpark dùng đúng Python của venv
+os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
+
+# Tự động định vị JAVA_HOME nếu terminal chưa load kịp biến môi trường
+if "JAVA_HOME" not in os.environ:
+    candidate_jdk = Path(os.environ.get("USERPROFILE", "C:/Users/ASUS")) / "jdk-21"
+    if candidate_jdk.exists():
+        subdirs = [d for d in candidate_jdk.iterdir() if d.is_dir()]
+        jdk_home = subdirs[0] if subdirs else candidate_jdk
+        os.environ["JAVA_HOME"] = str(jdk_home)
+        bin_dir = str(jdk_home / "bin")
+        if bin_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = f"{bin_dir};{os.environ.get('PATH', '')}"
+
 from src.common.schemas import TRIPS_SCHEMA, STATIONS_SCHEMA
 
 
@@ -607,8 +629,8 @@ def write_parquet(df, parquet_path):
             raise
 
         print(
-            "[OUTPUT] Bỏ qua Parquet: máy chưa có winutils/HADOOP_HOME "
-            f"({type(error).__name__}). Chỉ ghi CSV."
+            "[OUTPUT] Skip Parquet: winutils/HADOOP_HOME not found "
+            f"({type(error).__name__}). Writing CSV only."
         )
         return False
 

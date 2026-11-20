@@ -7,6 +7,29 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
+
+# Cấu hình UTF-8 cho console để tránh lỗi UnicodeEncodeError trên Windows cp1258
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+os.environ["PYTHONIOENCODING"] = "utf-8"
+
+# Tự động đảm bảo PySpark dùng đúng Python của venv
+os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
+
+# Tự động định vị JAVA_HOME nếu terminal chưa load kịp biến môi trường
+if "JAVA_HOME" not in os.environ:
+    candidate_jdk = Path(os.environ.get("USERPROFILE", "C:/Users/ASUS")) / "jdk-21"
+    if candidate_jdk.exists():
+        subdirs = [d for d in candidate_jdk.iterdir() if d.is_dir()]
+        jdk_home = subdirs[0] if subdirs else candidate_jdk
+        os.environ["JAVA_HOME"] = str(jdk_home)
+        bin_dir = str(jdk_home / "bin")
+        if bin_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = f"{bin_dir};{os.environ.get('PATH', '')}"
 
 # Định nghĩa các kịch bản thử nghiệm theo luật One-Change-At-A-Time
 EXPERIMENTS = {
@@ -41,7 +64,7 @@ def run_single_execution(script_path, extra_args):
     """Chạy 1 lần pipeline và trả về thời gian thực thi (giây)."""
     cmd = [sys.executable, script_path] + extra_args
     start_time = time.perf_counter()
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, env=os.environ)
     elapsed = time.perf_counter() - start_time
 
     if result.returncode != 0:
