@@ -173,3 +173,30 @@ Tham khảo [Citi Bike System Data](https://citibikenyc.com/system-data) và tu�
 - GBFS snapshot live không được dùng trong phân tích tháng này; nó không thể thay thế lịch sử và không phải artifact cốt lõi của Checkpoint 2.
 
 Xem [evidence checklist](docs/evidence_checklist.md), [kiến trúc](docs/architecture.md), [data dictionary](docs/data_dictionary.md) và [câu hỏi phân tích](docs/analysis_questions.md) để biết thêm chi tiết.
+
+## Checkpoint 4: Benchmark & Tối Ưu Hóa Pipeline (Buổi 10)
+
+Pipeline được tối ưu hóa hiệu năng theo nguyên tắc **One-Change-At-A-Time** (Slide 13), giải quyết 3 điểm nghẽn (bottlenecks):
+1. **Lever 1 (Tuning Shuffle Partitions):** Giảm `spark.sql.shuffle.partitions` từ 200 xuống 4 (khớp số CPU cores), triệt tiêu scheduling overhead của các task nhỏ.
+2. **Lever 2 (Broadcast Hash Join):** Áp dụng `broadcast(stations)` cho bảng Dimension 127 trạm (<10 KB), xóa bỏ hoàn toàn Shuffle Exchange của bảng trạm.
+3. **Lever 3 (In-Memory Caching):** Gọi `cleaned_trips.cache()` để tái sử dụng dữ liệu sạch trên RAM cho 3 phép gom nhóm độc lập.
+
+### Kết quả Benchmark (reports/benchmark.csv)
+- **Baseline (E00):** Median **28.68s** (Mean 29.14s, CV 2.88%)
+- **Lever 1: Shuffle=4 (E01):** Median **22.63s** (Nhanh hơn 21.1%)
+- **Lever 2: + Broadcast (E02):** Median **21.97s** (Nhanh hơn 23.4%)
+- **Lever 3: + Cache (E03 - Full Optimized):** Median **20.04s** (**Nhanh hơn 30.1%**, CV 1.19%)
+
+### Lệnh thực thi & tái tạo kết quả:
+```powershell
+# 1. Chạy Pipeline tối ưu hóa hoàn chỉnh:
+python src/pipeline_optimized.py --partitions 4 --broadcast --cache
+
+# 2. Chạy Benchmark đo lường tự động (3 lần chạy mỗi kịch bản):
+python src/benchmark.py --mode all --runs 3
+
+# 3. Kiểm chứng tính đúng đắn (Zero Regression):
+python src/verify_correctness.py --baseline output/baseline_csv --after output/preview_csv
+```
+
+Xem chi tiết tại [reports/experiment-log.md](reports/experiment-log.md) và [reports/checkpoint4.md](reports/checkpoint4.md).
